@@ -109,10 +109,10 @@ _DF_MAP = {
     "progressive complication": "turning", "complication": "turning",
     "midpoint": "midpoint", "mid_point": "midpoint", "mid-point": "midpoint",
     "crisis": "crisis", "dark night": "crisis", "all is lost": "crisis", "lowest point": "crisis",
-    "climax": "climax", "showdown": "climax", "confrontation": "climax",
+    "climax": "climax", "climax_build": "climax", "showdown": "climax", "confrontation": "climax",
     "reveal": "reveal", "revelation": "reveal", "discovery": "reveal",
     "decision": "decision", "choice": "decision", "commitment": "decision",
-    "consequence": "consequence", "resolution": "consequence", "ending": "consequence", "denouement": "consequence",
+    "consequence": "consequence", "resolution": "consequence", "ending": "consequence", "denouement": "consequence", "new_world": "consequence",
     "transition": "transition", "bridge": "transition", "interlude": "transition",
 }
 
