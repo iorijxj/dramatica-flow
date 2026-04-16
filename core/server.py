@@ -188,7 +188,7 @@ def _load_env():
     load_dotenv(ENV_PATH, override=True)
 
 
-def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int = 8192):
+def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int = 16384):
     """创建 LLM 实例（支持 deepseek / ollama / openai / zhipu / moonshot / qwen）"""
     from core.llm import LLMConfig, create_provider
     provider = os.environ.get("LLM_PROVIDER", "deepseek").lower()
