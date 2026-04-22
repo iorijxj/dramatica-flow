@@ -580,6 +580,9 @@ async function loadStep1() {
       </div>
       <div class="form-row" style="margin-top:12px">
         <div class="form-group"><label class="form-label">默认温度</label><input class="form-input" id="s-temp" type="number" step="0.1" value="${s.default_temperature}"></div>
+        <div class="form-group"><label class="form-label">最大输出 Token</label><input class="form-input" id="s-max-tokens" type="number" step="1" min="1" max="131072" value="${s.max_tokens||8192}"><div class="form-hint">DeepSeek 建议 8192</div></div>
+      </div>
+      <div class="form-row" style="margin-top:12px">
         <div class="form-group"><label class="form-label">审计模型（可选）</label><input class="form-input" id="s-auditor" value="${s.auditor_model||''}" placeholder="留空用主模型"></div>
       </div>
     </div>`;
@@ -614,6 +617,7 @@ async function saveSettingsAndNext() {
       ollama_base_url: document.getElementById('s-ol-url').value,
       ollama_model: document.getElementById('s-ol-model').value,
       default_temperature: document.getElementById('s-temp').value,
+      max_tokens: document.getElementById('s-max-tokens').value,
       auditor_model: document.getElementById('s-auditor').value,
       custom_base_url: isOpenAICompatible ? document.getElementById('s-cust-url').value : '',
       custom_api_key: isOpenAICompatible ? document.getElementById('s-cust-key').value : '',
@@ -3218,6 +3222,9 @@ async function loadSettingsPage() {
         </div>
         <div class="form-row" style="margin-top:12px">
           <div class="form-group"><label class="form-label">默认温度</label><input class="form-input" id="sp-temp" type="number" step="0.1" value="${s.default_temperature}"></div>
+          <div class="form-group"><label class="form-label">最大输出 Token</label><input class="form-input" id="sp-max-tokens" type="number" step="1" min="1" max="131072" value="${s.max_tokens||8192}"><div class="form-hint">DeepSeek 建议 8192</div></div>
+        </div>
+        <div class="form-row" style="margin-top:12px">
           <div class="form-group"><label class="form-label">审计模型</label><input class="form-input" id="sp-auditor" value="${s.auditor_model||''}" placeholder="留空用主模型"></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:16px">
@@ -3254,6 +3261,7 @@ async function saveSettingsFromPage() {
       ollama_base_url: document.getElementById('sp-ol-url').value,
       ollama_model: document.getElementById('sp-ol-model').value,
       default_temperature: document.getElementById('sp-temp').value,
+      max_tokens: document.getElementById('sp-max-tokens').value,
       auditor_model: document.getElementById('sp-auditor').value,
       custom_base_url: isOpenAICompatible ? document.getElementById('sp-cust-url').value : '',
       custom_api_key: isOpenAICompatible ? document.getElementById('sp-cust-key').value : '',
