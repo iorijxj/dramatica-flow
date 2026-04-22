@@ -188,11 +188,13 @@ def _load_env():
     load_dotenv(ENV_PATH, override=True)
 
 
-def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int = 16384):
+def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int | None = None):
     """创建 LLM 实例（支持 deepseek / ollama / openai / zhipu / moonshot / qwen）"""
     from core.llm import LLMConfig, create_provider
     provider = os.environ.get("LLM_PROVIDER", "deepseek").lower()
     temp = temperature if temperature is not None else float(os.environ.get("DEFAULT_TEMPERATURE", "0.7"))
+    if max_tokens is None:
+        max_tokens = int(os.environ.get("MAX_TOKENS", "8192"))
 
     if provider == "ollama":
         cfg = LLMConfig(
@@ -234,6 +236,7 @@ class SaveSettingsReq(BaseModel):
     ollama_model: str = "llama3.1"
     ollama_base_url: str = "http://localhost:11434/v1"
     default_temperature: str = "0.7"
+    max_tokens: str = "8192"
     auditor_model: str = ""
     # 新增：自定义提供商配置
     custom_base_url: str = ""
@@ -2777,6 +2780,7 @@ def get_settings():
         "ollama_base_url": "http://localhost:11434/v1",
         "ollama_model": "llama3.1",
         "default_temperature": "0.7",
+        "max_tokens": "8192",
         "auditor_model": "",
         "custom_base_url": "",
         "custom_model": "",
@@ -2801,6 +2805,8 @@ def get_settings():
                 result["ollama_model"] = vals[k]
             elif kl == "default_temperature":
                 result["default_temperature"] = vals[k]
+            elif kl == "max_tokens":
+                result["max_tokens"] = vals[k]
             elif kl == "auditor_model":
                 result["auditor_model"] = vals[k]
     # 读取当前提供商的配置（用于回填 custom 面板）
@@ -2886,6 +2892,7 @@ def save_settings(req: SaveSettingsReq):
         lines.append("")
     lines.append("# 写作参数")
     lines.append(f"DEFAULT_TEMPERATURE={req.default_temperature}")
+    lines.append(f"MAX_TOKENS={req.max_tokens}")
     if req.auditor_model:
         lines.append(f"AUDITOR_MODEL={req.auditor_model}")
     lines.append("")
@@ -2898,6 +2905,8 @@ def save_settings(req: SaveSettingsReq):
     os.environ["DEEPSEEK_MODEL"] = req.deepseek_model
     os.environ["OLLAMA_BASE_URL"] = req.ollama_base_url
     os.environ["OLLAMA_MODEL"] = req.ollama_model
+    os.environ["DEFAULT_TEMPERATURE"] = req.default_temperature
+    os.environ["MAX_TOKENS"] = req.max_tokens
     if provider not in ("deepseek", "ollama"):
         env_prefix = provider.upper() + "_"
         if req.custom_api_key:
