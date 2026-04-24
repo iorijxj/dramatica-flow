@@ -2274,6 +2274,8 @@ function selectWritingChapter(idx) {
     el.style.borderLeft = i === idx ? '3px solid var(--blue)' : '';
     el.style.background = i === idx ? 'var(--bg2)' : '';
   });
+  // 自动加载已有细纲（如果已生成过）
+  loadExistingDetailedOutline(chNum);
 }
 
 async function saveChapterOutline(idx) {
@@ -2291,6 +2293,45 @@ async function saveChapterOutline(idx) {
   } catch (e) { toast('保存失败: ' + e.message, false); }
 }
 
+async function loadExistingDetailedOutline(chNum) {
+  const area = document.getElementById('detail-outline-area');
+  if (!area) return;
+  try {
+    const res = await api(`/books/${currentBook.id}/detailed-outline/${chNum}`);
+    window._currentDetailedOutline = res;
+    renderDetailedOutline(res);
+  } catch {
+    // 细纲尚未生成，保持空白
+    window._currentDetailedOutline = null;
+  }
+}
+
+function renderDetailedOutline(d) {
+  const area = document.getElementById('detail-outline-area');
+  if (!area || !d) return;
+  area.innerHTML = `
+    <div class="card" style="padding:12px;background:var(--bg2);margin-top:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600;color:var(--purple)">&#10024; 细纲：${esc(d.title || '')}</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="editDetailedOutline()">&#9998; 编辑</button>
+          <button class="btn btn-sm" onclick="genDetailedOutline(${d.chapter_number})">&#128260; 重新生成</button>
+        </div>
+      </div>
+      <div style="font-size:11px;margin-bottom:8px">${esc(d.detailed_summary || '')}</div>
+      ${d.scenes?.length ? `<div style="font-size:11px;margin-bottom:6px"><b>场景拆分 (${d.scenes.length})：</b></div>
+        ${d.scenes.map((s, si) => `<div style="background:var(--bg);border-radius:6px;padding:8px;margin-bottom:6px">
+          <div style="font-size:11px;font-weight:600">${esc(s.scene_title || '场景'+(si+1))} <span style="color:var(--text3);font-weight:normal">[${esc(s.location||'')}] ${esc(s.word_budget||'')+'字'}</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">目标：${esc(s.goal||'')}</div>
+          <div style="font-size:11px;color:var(--text3)">冲突：${esc(s.conflict||'')}</div>
+          ${s.beats?.length ? `<div style="font-size:10px;color:var(--purple);margin-top:2px">节拍：${s.beats.map(b=>esc(b)).join(' → ')}</div>` : ''}
+        </div>`).join('')}` : ''}
+      ${d.hooks_to_plant?.length ? `<div style="font-size:10px;color:var(--yellow);margin-top:4px">&#128279; 埋伏笔：${d.hooks_to_plant.map(h=>esc(h)).join('、')}</div>` : ''}
+      ${d.hooks_to_advance?.length ? `<div style="font-size:10px;color:var(--blue);margin-top:2px">&#128260; 推伏笔：${d.hooks_to_advance.map(h=>esc(h)).join('、')}</div>` : ''}
+      ${d.chapter_end_hook ? `<div style="font-size:10px;color:var(--green);margin-top:2px">&#127919; 结尾钩子：${esc(d.chapter_end_hook)}</div>` : ''}
+    </div>`;
+}
+
 async function genDetailedOutline(chNum) {
   const area = document.getElementById('detail-outline-area');
   if (!area) return;
@@ -2305,23 +2346,7 @@ async function genDetailedOutline(chNum) {
     if (!res.ok) { toast('细纲生成失败', false); area.innerHTML = ''; return; }
     const d = res.data;
     window._currentDetailedOutline = d;
-    area.innerHTML = `
-      <div class="card" style="padding:12px;background:var(--bg2);margin-top:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:600">细纲：${esc(d.title || '')}</span>
-          <button class="btn btn-sm" onclick="editDetailedOutline()">编辑</button>
-        </div>
-        <div style="font-size:11px;margin-bottom:8px">${esc(d.detailed_summary || '')}</div>
-        ${d.scenes?.length ? `<div style="font-size:11px;margin-bottom:6px"><b>场景拆分 (${d.scenes.length})：</b></div>
-          ${d.scenes.map((s, si) => `<div style="background:var(--bg);border-radius:6px;padding:8px;margin-bottom:6px">
-            <div style="font-size:11px;font-weight:600">${esc(s.scene_title || '场景'+(si+1))} <span style="color:var(--text3);font-weight:normal">[${esc(s.location||'')}] ${esc(s.word_budget||'')+'字'}</span></div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">目标：${esc(s.goal||'')}</div>
-            <div style="font-size:11px;color:var(--text3)">冲突：${esc(s.conflict||'')}</div>
-            ${s.beats?.length ? `<div style="font-size:10px;color:var(--purple);margin-top:2px">节拍：${s.beats.map(b=>esc(b)).join(' → ')}</div>` : ''}
-          </div>`).join('')}` : ''}
-        ${d.hooks_to_plant?.length ? `<div style="font-size:10px;color:var(--yellow);margin-top:4px">埋伏笔：${d.hooks_to_plant.map(h=>esc(h)).join('、')}</div>` : ''}
-        ${d.chapter_end_hook ? `<div style="font-size:10px;color:var(--green);margin-top:2px">结尾钩子：${esc(d.chapter_end_hook)}</div>` : ''}
-      </div>`;
+    renderDetailedOutline(d);
     toast('细纲已生成', true);
   } catch (e) { toast('细纲生成失败: ' + e.message, false); area.innerHTML = ''; }
 }
@@ -2330,21 +2355,44 @@ function editDetailedOutline() {
   const d = window._currentDetailedOutline;
   if (!d) return;
   const area = document.getElementById('detail-outline-area');
+  const scenesJson = JSON.stringify(d.scenes || [], null, 2);
   area.innerHTML = `
     <div class="card" style="padding:12px;background:var(--bg2);margin-top:8px">
+      <div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:10px">&#9998; 编辑细纲</div>
       <div class="form-group" style="margin-bottom:8px">
-        <label class="form-label" style="font-size:11px">详细摘要（可编辑）</label>
+        <label class="form-label" style="font-size:11px">详细摘要</label>
         <textarea class="form-textarea" id="ed-detail-summary" rows="4" style="font-size:12px">${esc(d.detailed_summary || '')}</textarea>
       </div>
       <div class="form-group" style="margin-bottom:8px">
+        <label class="form-label" style="font-size:11px">场景列表（JSON 格式，可编辑场景标题、地点、目标、冲突、节拍等）</label>
+        <textarea class="form-textarea" id="ed-detail-scenes" rows="10" style="font-size:11px;font-family:monospace">${esc(scenesJson)}</textarea>
+        <div class="form-hint">修改时保持 JSON 格式正确。每个场景可包含：scene_title, location, characters, time_marker, goal, conflict, beats, emotional_shift, dialogue_notes, ending, word_budget</div>
+      </div>
+      <div class="form-row" style="margin-bottom:8px">
+        <div class="form-group">
+          <label class="form-label" style="font-size:11px">要埋下的伏笔（每行一个）</label>
+          <textarea class="form-textarea" id="ed-detail-plant" rows="2" style="font-size:11px">${esc((d.hooks_to_plant||[]).join('\n'))}</textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size:11px">要推进的伏笔（每行一个）</label>
+          <textarea class="form-textarea" id="ed-detail-advance" rows="2" style="font-size:11px">${esc((d.hooks_to_advance||[]).join('\n'))}</textarea>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
         <label class="form-label" style="font-size:11px">结尾钩子</label>
         <input class="form-input" id="ed-detail-hook" value="${esc(d.chapter_end_hook || '')}" style="font-size:12px">
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-sm" onclick="saveDetailedOutline()">保存修改</button>
-        <button class="btn btn-sm" onclick="genDetailedOutline(${d.chapter_number})">重新生成</button>
+        <button class="btn btn-sm btn-primary" onclick="saveDetailedOutline()">&#128190; 保存修改</button>
+        <button class="btn btn-sm" onclick="cancelEditDetailedOutline()">取消</button>
+        <button class="btn btn-sm" onclick="genDetailedOutline(${d.chapter_number})">&#128260; 重新生成</button>
       </div>
     </div>`;
+}
+
+function cancelEditDetailedOutline() {
+  const d = window._currentDetailedOutline;
+  if (d) renderDetailedOutline(d);
 }
 
 async function saveDetailedOutline() {
@@ -2352,11 +2400,23 @@ async function saveDetailedOutline() {
   if (!d) return;
   d.detailed_summary = document.getElementById('ed-detail-summary').value;
   d.chapter_end_hook = document.getElementById('ed-detail-hook').value;
+  // 解析场景 JSON
+  try {
+    const scenesText = document.getElementById('ed-detail-scenes').value;
+    d.scenes = JSON.parse(scenesText);
+  } catch (e) {
+    toast('场景 JSON 格式错误：' + e.message, false);
+    return;
+  }
+  // 解析伏笔
+  d.hooks_to_plant = document.getElementById('ed-detail-plant').value.split('\n').map(s => s.trim()).filter(Boolean);
+  d.hooks_to_advance = document.getElementById('ed-detail-advance').value.split('\n').map(s => s.trim()).filter(Boolean);
   try {
     await api(`/books/${currentBook.id}/detailed-outline/${d.chapter_number}`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(d),
     });
+    renderDetailedOutline(d);
     toast('细纲已保存', true);
   } catch (e) { toast('保存失败: ' + e.message, false); }
 }
