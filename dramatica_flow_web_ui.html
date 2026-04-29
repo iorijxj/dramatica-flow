@@ -121,6 +121,29 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft Ya
 .act-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; padding: 8px 12px; background: var(--bg3); border-radius: 6px; border: 1px solid var(--border); }
 .seq-item { display: flex; gap: 10px; padding: 10px 12px; border-radius: 6px; margin-bottom: 4px; border: 1px solid transparent; transition: all .15s; }
 .seq-item:hover { border-color: var(--border); background: var(--surface2); }
+/* ── 章节大纲内联编辑 ───────────────────────────────────────────────────── */
+.co-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; transition: all .2s; }
+.co-item.active { border-color: var(--blue); box-shadow: 0 0 0 1px rgba(88,166,255,.15); }
+.co-header { display: flex; gap: 10px; padding: 12px 14px; cursor: pointer; align-items: center; transition: background .15s; }
+.co-header:hover { background: var(--surface2); }
+.co-header .co-num { font-size: 11px; color: var(--purple); font-weight: 600; min-width: 40px; }
+.co-header .co-title { flex: 1; font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.co-header .co-info { font-size: 11px; color: var(--text3); white-space: nowrap; }
+.co-header .co-arrow { font-size: 10px; color: var(--text3); transition: transform .2s; width: 16px; text-align: center; }
+.co-item.active .co-arrow { transform: rotate(90deg); }
+.co-body { display: none; padding: 0 14px 14px; background: var(--bg-dark); border-top: 1px solid var(--border); }
+.co-item.active .co-body { display: block; }
+.co-body .co-field { margin-bottom: 10px; }
+.co-body .co-field label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 4px; font-weight: 500; }
+.co-body .co-field input, .co-body .co-field textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; color: var(--text); resize: vertical; }
+.co-body .co-field input:focus, .co-body .co-field textarea:focus { outline: none; border-color: var(--blue); }
+.co-body .co-actions { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.co-beats-list { list-style: none; padding: 0; margin: 0; }
+.co-beats-list li { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); align-items: flex-start; font-size: 12px; }
+.co-beats-list li .beat-desc { flex: 1; color: var(--text); }
+.co-beats-list li .beat-detail { font-size: 11px; color: var(--text2); line-height: 1.6; padding-left: 2px; }
+.co-beats-list li .beat-func { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg2); color: var(--text3); white-space: nowrap; }
+.co-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 /* ── 伏笔/关系/因果 ─────────────────────────────────────────────────────── */
 .hook-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -1989,6 +2012,7 @@ function renderStep4ChOutlines() {
       </div>
     </div>`;
   }
+  if (typeof chOutlineEditingIdx === 'undefined') window.chOutlineEditingIdx = -1;
   return `
     <div class="toolbar">
       <button class="btn btn-primary" onclick="aiGenChapterOutlines()">重新生成</button>
@@ -1996,39 +2020,128 @@ function renderStep4ChOutlines() {
       <button class="btn" onclick="showImportChOutlinesModal()">&#128229; 导入章纲</button>
       <button class="btn btn-success" onclick="unlockStep(5);goStep(5)">大纲确定，开始写作 &#8250;</button>
     </div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">共 ${cos.length} 章。点击章节可编辑，或使用 AI 续写追加新章节。</div>
-    ${cos.map((co, i) => `
-      <div class="seq-item" style="cursor:pointer;gap:8px" onclick="editChOutline(${i})">
-        <div style="font-size:11px;color:var(--purple);min-width:40px;font-weight:600">Ch.${co.chapter_number || co.chapter || i+1}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12px">${esc(co.title || '未命名')}</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc(co.summary || co.purpose || '')}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">共 ${cos.length} 章。点击章节展开编辑，修改后点保存。</div>
+    ${cos.map((co, i) => {
+      const chNum = co.chapter_number || co.chapter || i+1;
+      const isActive = chOutlineEditingIdx === i;
+      const beats = co.beats || [];
+      return `
+      <div class="co-item ${isActive?'active':''}" id="co-item-${i}">
+        <div class="co-header" onclick="toggleChOutlineEdit(${i})">
+          <span class="co-arrow">&#9654;</span>
+          <span class="co-num">Ch.${chNum}</span>
+          <span class="co-title">${esc(co.title || '未命名')}</span>
+          <span class="co-info">${co.target_words || co.word_target || '-'}字${beats.length ? ' · '+beats.length+'拍':''}</span>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteChOutline(${i})" title="删除">&#128465;</button>
         </div>
-        <div style="font-size:11px;color:var(--text3)">${co.target_words || co.word_target || '-'}字</div>
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteChOutline(${i})" title="删除">&#128465;</button>
-      </div>
-    `).join('')}
+        <div class="co-body">
+          <div class="co-field">
+            <label>章节标题</label>
+            <input id="co-title-${i}" value="${esc(co.title||'')}" placeholder="章节标题">
+          </div>
+          <div class="co-field">
+            <label>章节摘要</label>
+            <textarea id="co-summary-${i}" rows="4" placeholder="本章主要剧情">${esc(co.summary || co.purpose || '')}</textarea>
+          </div>
+          <div class="co-row-2">
+            <div class="co-field">
+              <label>视角角色 (POV)</label>
+              <input id="co-pov-${i}" value="${esc(co.pov||'')}" placeholder="如：林婉儿">
+            </div>
+            <div class="co-field">
+              <label>目标字数</label>
+              <input id="co-words-${i}" type="number" value="${co.target_words || co.word_target || 4000}" style="width:100%">
+            </div>
+          </div>
+          <div class="co-row-2">
+            <div class="co-field">
+              <label>情感弧线 - 起</label>
+              <input id="co-emo-start-${i}" value="${esc(co.emotional_arc?.start||'')}" placeholder="如：平静">
+            </div>
+            <div class="co-field">
+              <label>情感弧线 - 终</label>
+              <input id="co-emo-end-${i}" value="${esc(co.emotional_arc?.end||'')}" placeholder="如：紧张">
+            </div>
+          </div>
+          <div class="co-field">
+            <label>写作基调</label>
+            <input id="co-notes-${i}" value="${esc(co.writing_notes||'')}" placeholder="本章写作风格或基调指导（可选）">
+          </div>
+          ${beats.length ? `
+          <div class="co-field">
+            <label>节拍 (${beats.length})</label>
+            <ul class="co-beats-list">
+              ${beats.map((b, bi) => `
+                <li style="flex-direction:column;gap:2px">
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <span class="beat-desc">${esc(b.description || b)}</span>
+                    ${b.dramatic_function ? `<span class="beat-func">${esc(b.dramatic_function)}</span>` : ''}
+                  </div>
+                  ${b.detail ? `<div style="font-size:11px;color:var(--text2);padding-left:2px;line-height:1.6">${esc(b.detail)}</div>` : ''}
+                </li>
+              `).join('')}
+            </ul>
+          </div>` : ''}
+          ${co.mandatory_tasks?.length ? `
+          <div class="co-field">
+            <label>必须完成的任务</label>
+            <div style="font-size:12px;color:var(--text2)">${co.mandatory_tasks.map(t => esc(t)).join('、')}</div>
+          </div>` : ''}
+          ${co.weapon_tech_notes ? `
+          <div class="co-field">
+            <label>武器/技术备注</label>
+            <textarea id="co-weapon-${i}" rows="6" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text);resize:vertical">${esc(JSON.stringify(co.weapon_tech_notes, null, 2))}</textarea>
+          </div>` : ''}
+          <div class="co-actions">
+            <button class="btn btn-primary btn-sm" onclick="saveChOutlineInline(${i})">&#128190; 保存修改</button>
+            <button class="btn btn-sm" onclick="toggleChOutlineEdit(${i})">收起</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
     <div style="text-align:center;margin-top:12px">
       <button class="btn btn-warning btn-sm" onclick="aiContinueChOutlines()">+ AI 续写新章节</button>
       <button class="btn btn-sm" onclick="addChOutlineManual()" style="margin-left:8px">+ 手动添加章节</button>
     </div>`;
 }
 
-function editChOutline(idx) {
+function toggleChOutlineEdit(idx) {
+  window.chOutlineEditingIdx = window.chOutlineEditingIdx === idx ? -1 : idx;
+  loadStep4();
+  // 展开后滚动到该章节
+  if (window.chOutlineEditingIdx >= 0) {
+    setTimeout(() => {
+      const el = document.getElementById('co-item-' + idx);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+}
+
+async function saveChOutlineInline(idx) {
   const co = chapterOutlinesCache[idx];
   if (!co) return;
-  const newTitle = prompt('章节标题：', co.title || '');
-  if (newTitle === null) return;
-  const newSummary = prompt('章节摘要：', co.summary || co.purpose || '');
-  if (newSummary === null) return;
-  chapterOutlinesCache[idx].title = newTitle;
-  chapterOutlinesCache[idx].summary = newSummary;
-  // 保存
-  api(`/books/${currentBook.id}/chapter-outlines`, {
-    method: 'PUT', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ outlines: chapterOutlinesCache }),
-  }).then(() => toast('已更新', true)).catch(e => toast(e.message, false));
-  loadStep4();
+  co.title = document.getElementById('co-title-' + idx)?.value || co.title;
+  co.summary = document.getElementById('co-summary-' + idx)?.value || co.summary;
+  co.pov = document.getElementById('co-pov-' + idx)?.value || '';
+  co.target_words = parseInt(document.getElementById('co-words-' + idx)?.value) || co.target_words || 4000;
+  const emoStart = document.getElementById('co-emo-start-' + idx)?.value || '';
+  const emoEnd = document.getElementById('co-emo-end-' + idx)?.value || '';
+  co.emotional_arc = { start: emoStart, end: emoEnd };
+  co.writing_notes = document.getElementById('co-notes-' + idx)?.value || '';
+  // 保留 weapon_tech_notes（如有编辑框则回写）
+  const weaponEl = document.getElementById('co-weapon-' + idx);
+  if (weaponEl && co.weapon_tech_notes) {
+    try { co.weapon_tech_notes = JSON.parse(weaponEl.value); } catch {}
+  }
+  try {
+    await api(`/books/${currentBook.id}/chapter-outlines`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ outlines: chapterOutlinesCache }),
+    });
+    bookData.chapterOutlines = chapterOutlinesCache;
+    toast('章节大纲已保存', true);
+    loadStep4();
+  } catch (e) { toast('保存失败: ' + e.message, false); }
 }
 
 async function aiGenChapterOutlines() {
