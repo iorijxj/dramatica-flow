@@ -188,11 +188,13 @@ def _load_env():
     load_dotenv(ENV_PATH, override=True)
 
 
-def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int = 16384):
+def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int | None = None):
     """创建 LLM 实例（支持 deepseek / ollama / openai / zhipu / moonshot / qwen）"""
     from core.llm import LLMConfig, create_provider
     provider = os.environ.get("LLM_PROVIDER", "deepseek").lower()
     temp = temperature if temperature is not None else float(os.environ.get("DEFAULT_TEMPERATURE", "0.7"))
+    if max_tokens is None:
+        max_tokens = int(os.environ.get("MAX_TOKENS", "0"))
 
     if provider == "ollama":
         cfg = LLMConfig(
@@ -234,6 +236,7 @@ class SaveSettingsReq(BaseModel):
     ollama_model: str = "llama3.1"
     ollama_base_url: str = "http://localhost:11434/v1"
     default_temperature: str = "0.7"
+    max_tokens: str = "8192"
     auditor_model: str = ""
     # 新增：自定义提供商配置
     custom_base_url: str = ""
@@ -257,6 +260,8 @@ class SaveChapterOutlinesReq(BaseModel):
     outlines: list  # 章纲列表
 
 class UpdateBookConfigReq(BaseModel):
+    title: str | None = None
+    genre: str | None = None
     style_guide: str = ""
     forbidden: str = ""
     protagonist_id: str = ""
@@ -1390,6 +1395,10 @@ def update_book_config(book_id: str, req: UpdateBookConfigReq):
         cfg_data["target_chapters"] = req.target_chapters
     if req.target_words_per_chapter is not None and req.target_words_per_chapter > 0:
         cfg_data["target_words_per_chapter"] = req.target_words_per_chapter
+    if req.title is not None:
+        cfg_data["title"] = req.title
+    if req.genre is not None:
+        cfg_data["genre"] = req.genre
     sm._write_json("config.json", cfg_data)
     return {"ok": True, "message": "配置已更新"}
 
@@ -2777,6 +2786,7 @@ def get_settings():
         "ollama_base_url": "http://localhost:11434/v1",
         "ollama_model": "llama3.1",
         "default_temperature": "0.7",
+        "max_tokens": "8192",
         "auditor_model": "",
         "custom_base_url": "",
         "custom_model": "",
@@ -2801,6 +2811,8 @@ def get_settings():
                 result["ollama_model"] = vals[k]
             elif kl == "default_temperature":
                 result["default_temperature"] = vals[k]
+            elif kl == "max_tokens":
+                result["max_tokens"] = vals[k]
             elif kl == "auditor_model":
                 result["auditor_model"] = vals[k]
     # 读取当前提供商的配置（用于回填 custom 面板）
@@ -2886,6 +2898,7 @@ def save_settings(req: SaveSettingsReq):
         lines.append("")
     lines.append("# 写作参数")
     lines.append(f"DEFAULT_TEMPERATURE={req.default_temperature}")
+    lines.append(f"MAX_TOKENS={req.max_tokens}")
     if req.auditor_model:
         lines.append(f"AUDITOR_MODEL={req.auditor_model}")
     lines.append("")
@@ -2898,6 +2911,8 @@ def save_settings(req: SaveSettingsReq):
     os.environ["DEEPSEEK_MODEL"] = req.deepseek_model
     os.environ["OLLAMA_BASE_URL"] = req.ollama_base_url
     os.environ["OLLAMA_MODEL"] = req.ollama_model
+    os.environ["DEFAULT_TEMPERATURE"] = req.default_temperature
+    os.environ["MAX_TOKENS"] = req.max_tokens
     if provider not in ("deepseek", "ollama"):
         env_prefix = provider.upper() + "_"
         if req.custom_api_key:
@@ -2907,6 +2922,81 @@ def save_settings(req: SaveSettingsReq):
         if req.custom_model:
             os.environ[f"{env_prefix}MODEL"] = req.custom_model
     return {"ok": True}
+
+
+class TestLLMConnectionReq(BaseModel):
+    llm_provider: str = "deepseek"
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com/v1"
+    deepseek_model: str = "deepseek-chat"
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str = "llama3.1"
+    custom_base_url: str = ""
+    custom_api_key: str = ""
+    custom_model: str = ""
+
+
+@app.post("/api/test-llm-connection")
+async def test_llm_connection(req: TestLLMConnectionReq):
+    """测试 LLM 连接是否可用"""
+    from core.llm import LLMConfig, create_provider, LLMMessage
+
+    provider = req.llm_provider.lower()
+
+    try:
+        if provider == "ollama":
+            cfg = LLMConfig(
+                api_key="ollama",
+                base_url=req.ollama_base_url,
+                model=req.ollama_model,
+                temperature=0.1,
+                max_tokens=10,
+            )
+        elif provider == "deepseek":
+            cfg = LLMConfig(
+                api_key=req.deepseek_api_key,
+                base_url=req.deepseek_base_url,
+                model=req.deepseek_model,
+                temperature=0.1,
+                max_tokens=10,
+            )
+        else:
+            # openai / zhipu / moonshot / qwen / custom
+            cfg = LLMConfig(
+                api_key=req.custom_api_key,
+                base_url=req.custom_base_url,
+                model=req.custom_model,
+                temperature=0.1,
+                max_tokens=10,
+            )
+
+        llm = create_provider(cfg, provider_type=provider)
+
+        # 用极简请求测试连接
+        resp = await asyncio.to_thread(
+            llm.complete,
+            [LLMMessage("user", "Hello")],
+        )
+
+        return {
+            "ok": True,
+            "message": "连接成功！模型返回正常",
+            "model": cfg.model,
+            "input_tokens": resp.input_tokens,
+            "output_tokens": resp.output_tokens,
+        }
+    except Exception as e:
+        error_msg = str(e)
+        # 提炼关键错误信息
+        if "401" in error_msg or "unauthorized" in error_msg.lower() or "auth" in error_msg.lower():
+            return {"ok": False, "message": "API Key 无效或未授权", "detail": error_msg}
+        if "404" in error_msg or "not found" in error_msg.lower():
+            return {"ok": False, "message": f"模型 '{cfg.model}' 不存在或接口地址错误", "detail": error_msg}
+        if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+            return {"ok": False, "message": "连接超时，请检查网络或接口地址", "detail": error_msg}
+        if "connection" in error_msg.lower() or "refused" in error_msg.lower():
+            return {"ok": False, "message": "无法连接服务器，请检查地址和端口", "detail": error_msg}
+        return {"ok": False, "message": f"连接失败：{error_msg[:200]}", "detail": error_msg}
 
 
 # ── /api/action/*  触发 CLI 命令 ─────────────────────────────────────────────
@@ -2982,7 +3072,7 @@ async def ai_generate_detailed_outline(book_id: str, req: DetailedOutlineReq):
 ## 基本信息
 - 章节标题：{target_co.get('title', f'第{req.chapter_number}章')}
 - 章节摘要：{target_co.get('summary', '无')}
-- 目标字数：{target_co.get('target_words', 2000)}字
+- 目标字数：{target_co.get('target_words', 4000)}字
 
 ## 前后章节衔接{adjacent_ctx}
 
@@ -3166,7 +3256,9 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
     hooks_plant = json.dumps(detailed.get("hooks_to_plant", []), ensure_ascii=False)
     hooks_advance = json.dumps(detailed.get("hooks_to_advance", []), ensure_ascii=False)
     end_hook = detailed.get("chapter_end_hook", "")
-    target_words = target_co.get("target_words", 2000)
+    target_words = target_co.get("target_words", 4000)
+    if target_words < 500:
+        target_words = 4000
 
     prev_section = ""
     if prev_content.strip():
@@ -3219,14 +3311,15 @@ async def ai_generate_chapter_content(book_id: str, req: ChapterContentReq):
 {recent_summaries if recent_summaries.strip() else '（这是早期章节）'}
 
 ## 写作要求
+- **字数硬性要求：正文必须达到 {int(target_words*0.9)}～{target_words} 字，不能少于 {int(target_words*0.8)} 字。每个场景都要充分展开，不能压缩跳过。**
 - 本章开头必须与前一章结尾自然衔接，不能突兀跳转
-- 字数控制在 {target_words} 字左右
 - 场景之间要有自然过渡
 - 对话要有角色个性，体现角色关系
 - 伏笔推进要有机融入情节，不能生硬提及
 - 角色情感要与前文保持一致
 - 结尾要留下悬念（{end_hook}）
 - 纯正文输出，不要任何标注或说明
+- 写完后请检查字数，如果不足请继续补充细节描写和对话，直到达到字数要求
 """
 
     def _call():

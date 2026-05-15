@@ -121,6 +121,29 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft Ya
 .act-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; padding: 8px 12px; background: var(--bg3); border-radius: 6px; border: 1px solid var(--border); }
 .seq-item { display: flex; gap: 10px; padding: 10px 12px; border-radius: 6px; margin-bottom: 4px; border: 1px solid transparent; transition: all .15s; }
 .seq-item:hover { border-color: var(--border); background: var(--surface2); }
+/* ── 章节大纲内联编辑 ───────────────────────────────────────────────────── */
+.co-item { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; transition: all .2s; }
+.co-item.active { border-color: var(--blue); box-shadow: 0 0 0 1px rgba(88,166,255,.15); }
+.co-header { display: flex; gap: 10px; padding: 12px 14px; cursor: pointer; align-items: center; transition: background .15s; }
+.co-header:hover { background: var(--surface2); }
+.co-header .co-num { font-size: 11px; color: var(--purple); font-weight: 600; min-width: 40px; }
+.co-header .co-title { flex: 1; font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.co-header .co-info { font-size: 11px; color: var(--text3); white-space: nowrap; }
+.co-header .co-arrow { font-size: 10px; color: var(--text3); transition: transform .2s; width: 16px; text-align: center; }
+.co-item.active .co-arrow { transform: rotate(90deg); }
+.co-body { display: none; padding: 0 14px 14px; background: var(--bg-dark); border-top: 1px solid var(--border); }
+.co-item.active .co-body { display: block; }
+.co-body .co-field { margin-bottom: 10px; }
+.co-body .co-field label { display: block; font-size: 11px; color: var(--text2); margin-bottom: 4px; font-weight: 500; }
+.co-body .co-field input, .co-body .co-field textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; color: var(--text); resize: vertical; }
+.co-body .co-field input:focus, .co-body .co-field textarea:focus { outline: none; border-color: var(--blue); }
+.co-body .co-actions { display: flex; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.co-beats-list { list-style: none; padding: 0; margin: 0; }
+.co-beats-list li { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); align-items: flex-start; font-size: 12px; }
+.co-beats-list li .beat-desc { flex: 1; color: var(--text); }
+.co-beats-list li .beat-detail { font-size: 11px; color: var(--text2); line-height: 1.6; padding-left: 2px; }
+.co-beats-list li .beat-func { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--bg2); color: var(--text3); white-space: nowrap; }
+.co-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 /* ── 伏笔/关系/因果 ─────────────────────────────────────────────────────── */
 .hook-row { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -322,6 +345,27 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft Ya
   </div>
 </div>
 
+<!-- ── 弹窗：编辑书籍设置 ─────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-edit-book" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal">
+    <h3>编辑书籍设置</h3>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">书名 *</label><input class="form-input" id="eb-title" placeholder="例：吞天魔帝"></div>
+      <div class="form-group"><label class="form-label">题材</label><select class="form-select" id="eb-genre"><option>玄幻</option><option>仙侠</option><option>都市</option><option>科幻</option><option>历史</option><option>言情</option><option>悬疑</option><option>游戏</option><option>无限流</option><option>其他</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">目标章数</label><input class="form-input" id="eb-chapters" type="number" value="90"></div>
+      <div class="form-group"><label class="form-label">每章字数</label><input class="form-input" id="eb-words" type="number" value="4000"></div>
+    </div>
+    <div class="form-group"><label class="form-label">禁止词（逗号分隔）</label><input class="form-input" id="eb-forbidden" placeholder="例：突然,顿时,不禁"></div>
+    <div class="form-group"><label class="form-label">文风指南</label><textarea class="form-textarea" id="eb-style" rows="3" placeholder="描述你想要的文风，如：简洁明快、偏古风、注重心理描写..."></textarea></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="btn" onclick="document.getElementById('modal-edit-book').style.display='none'">取消</button>
+      <button class="btn btn-success" onclick="saveEditBookSettings()">保存修改</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── 弹窗：查看章节 ─────────────────────────────────────────────────────── -->
 <div class="modal-overlay" id="modal-chapter" style="display:none" onclick="if(event.target===this)this.style.display='none'">
   <div class="modal" style="max-width:720px">
@@ -509,18 +553,48 @@ async function batchAutoGenerateThreads() {
 async function editBookSettings(id) {
   const b = allBooks.find(x => x.id === id);
   if (!b) return;
-  const newChapters = prompt('修改目标章节数：', b.target_chapters);
-  if (newChapters === null) return;
-  const n = parseInt(newChapters);
-  if (!n || n < 1) return toast('章节数无效', false);
+  document.getElementById('eb-title').value = b.title || '';
+  document.getElementById('eb-genre').value = b.genre || '玄幻';
+  document.getElementById('eb-chapters').value = b.target_chapters || 90;
+  document.getElementById('eb-words').value = b.target_words_per_chapter || 4000;
+  document.getElementById('eb-forbidden').value = (b.custom_forbidden_words || []).join(',');
+  document.getElementById('eb-style').value = b.style_guide || '';
+  document.getElementById('modal-edit-book').dataset.bookId = id;
+  document.getElementById('modal-edit-book').style.display = 'flex';
+}
+
+async function saveEditBookSettings() {
+  const id = document.getElementById('modal-edit-book').dataset.bookId;
+  if (!id) return;
+  const title = document.getElementById('eb-title').value.trim();
+  if (!title) return toast('请填写书名', false);
   try {
     await api(`/books/${id}/config`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ target_chapters: n }),
+      body: JSON.stringify({
+        title: title,
+        genre: document.getElementById('eb-genre').value,
+        target_chapters: parseInt(document.getElementById('eb-chapters').value) || 90,
+        target_words_per_chapter: parseInt(document.getElementById('eb-words').value) || 4000,
+        forbidden: document.getElementById('eb-forbidden').value,
+        style_guide: document.getElementById('eb-style').value,
+      }),
     });
-    toast(`目标章节数已更新为 ${n}`, true);
+    toast('书籍设置已更新', true);
+    document.getElementById('modal-edit-book').style.display = 'none';
     await loadBooks();
     if (currentBook && currentBook.id === id) { await loadBookData(); }
+    // 刷新当前步骤的显示
+    const stepPanels = ['step2-panel', 'step3-panel', 'step4-panel', 'step5-panel', 'step6-panel', 'step7-panel'];
+    for (const panelId of stepPanels) {
+      const panel = document.getElementById(panelId);
+      if (panel && panel.style.display !== 'none') {
+        const step = panelId.replace('-panel', '').replace('step', '');
+        const fn = window['loadStep' + step];
+        if (fn) fn();
+        break;
+      }
+    }
   } catch (e) { toast('更新失败: ' + e.message, false); }
 }
 
@@ -580,7 +654,14 @@ async function loadStep1() {
       </div>
       <div class="form-row" style="margin-top:12px">
         <div class="form-group"><label class="form-label">默认温度</label><input class="form-input" id="s-temp" type="number" step="0.1" value="${s.default_temperature}"></div>
+        <div class="form-group"><label class="form-label">最大输出 Token</label><input class="form-input" id="s-max-tokens" type="number" step="1" min="1" max="131072" value="${s.max_tokens||8192}"><div class="form-hint">DeepSeek 建议 8192</div></div>
+      </div>
+      <div class="form-row" style="margin-top:12px">
         <div class="form-group"><label class="form-label">审计模型（可选）</label><input class="form-input" id="s-auditor" value="${s.auditor_model||''}" placeholder="留空用主模型"></div>
+      </div>
+      <div style="margin-top:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <button class="btn" onclick="testLLMConnection('step1')" id="s-test-btn" style="min-width:120px">&#128268; 测试连接</button>
+        <span id="s-test-result" style="font-size:13px"></span>
       </div>
     </div>`;
 }
@@ -614,6 +695,7 @@ async function saveSettingsAndNext() {
       ollama_base_url: document.getElementById('s-ol-url').value,
       ollama_model: document.getElementById('s-ol-model').value,
       default_temperature: document.getElementById('s-temp').value,
+      max_tokens: document.getElementById('s-max-tokens').value,
       auditor_model: document.getElementById('s-auditor').value,
       custom_base_url: isOpenAICompatible ? document.getElementById('s-cust-url').value : '',
       custom_api_key: isOpenAICompatible ? document.getElementById('s-cust-key').value : '',
@@ -622,6 +704,48 @@ async function saveSettingsAndNext() {
   });
   apiConfigured = true; apiProvider = provider;
   updateStepsBar(); toast('配置已保存', true); goStep(2);
+}
+
+async function testLLMConnection(source) {
+  const prefix = source === 'step1' ? 's-' : 'sp-';
+  const btn = document.getElementById(prefix + 'test-btn');
+  const resultEl = document.getElementById(prefix + 'test-result');
+  const tabs = document.querySelector('#' + (source === 'step1' ? 'settings-panel' : 'settings-page-panel') + ' .mode-tabs');
+  const provider = tabs && tabs.dataset.provider ? tabs.dataset.provider : 'deepseek';
+  const isOllama = provider === 'ollama';
+  const isOpenAICompatible = !isOllama && provider !== 'deepseek';
+
+  btn.disabled = true;
+  btn.textContent = '测试中...';
+  resultEl.innerHTML = '<span style="color:var(--text3)">正在连接...</span>';
+
+  try {
+    const resp = await api('/test-llm-connection', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        llm_provider: provider,
+        deepseek_api_key: document.getElementById(prefix + 'ds-key').value,
+        deepseek_base_url: document.getElementById(prefix + 'ds-url').value,
+        deepseek_model: document.getElementById(prefix + 'ds-model').value,
+        ollama_base_url: document.getElementById(prefix + 'ol-url').value,
+        ollama_model: document.getElementById(prefix + 'ol-model').value,
+        custom_base_url: isOpenAICompatible ? document.getElementById(prefix + 'cust-url').value : '',
+        custom_api_key: isOpenAICompatible ? document.getElementById(prefix + 'cust-key').value : '',
+        custom_model: isOpenAICompatible ? document.getElementById(prefix + 'cust-model').value : '',
+      }),
+    });
+
+    if (resp.ok) {
+      resultEl.innerHTML = '<span style="color:var(--green);font-weight:500">&#10003; ' + esc(resp.message) + '</span>';
+    } else {
+      resultEl.innerHTML = '<span style="color:#e74c3c;font-weight:500">&#10007; ' + esc(resp.message) + '</span>';
+    }
+  } catch (e) {
+    resultEl.innerHTML = '<span style="color:#e74c3c;font-weight:500">&#10007; 请求失败：' + esc(e.message) + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '\uD83D\uDD0C 测试连接';
+  }
 }
 
 // ── Step 2: 创建书籍 ──────────────────────────────────────────────────────
@@ -694,7 +818,7 @@ async function loadStep3(forceSelect) {
   try { status = await api(`/books/${currentBook.id}/setup/status`); } catch { status = { has_templates: false, has_setup_state: false }; }
   if (status.has_setup_state && !forceSelect) {
     document.getElementById('step3-panel').innerHTML = `
-      <div class="guide-card"><h2>世界观已配置</h2><p>此书世界观已加载成功。你可以选择修改方式：</p>
+      <div class="guide-card"><h2>世界观已配置 <span style="font-size:12px;font-weight:400;margin-left:12px"><button class="btn btn-ghost btn-sm" onclick="editBookSettings('${currentBook.id}')">&#9881; 书籍设置</button></span></h2><p>此书世界观已加载成功。你可以选择修改方式：</p>
         <div style="text-align:left;max-width:500px;margin:0 auto;display:flex;flex-direction:column;gap:10px;margin-top:16px">
           <div style="display:flex;gap:12px;align-items:center;padding:12px;background:var(--bg-dark);border-radius:6px;border-left:3px solid var(--green);cursor:pointer" onclick="editExistingSetup('form')">
             <div style="font-size:20px">&#128221;</div>
@@ -725,7 +849,7 @@ async function loadStep3(forceSelect) {
   }
   if (!status.has_templates || forceSelect) {
     document.getElementById('step3-panel').innerHTML = `
-      <div class="guide-card"><h2>设定世界观</h2>
+      <div class="guide-card"><h2>设定世界观 <span style="font-size:12px;font-weight:400;margin-left:12px"><button class="btn btn-ghost btn-sm" onclick="editBookSettings('${currentBook.id}')">&#9881; 书籍设置</button></span></h2>
         <p>世界观是小说的基础，包括<b>角色</b>、<b>世界</b>和<b>事件</b>三个部分。<br>
         你可以选择以下方式来配置：</p>
         <div style="text-align:left;max-width:500px;margin:0 auto;display:flex;flex-direction:column;gap:10px">
@@ -1783,7 +1907,7 @@ function loadStep4() {
   document.getElementById('step4-panel').innerHTML = `
     <div style="max-width:900px;margin:0 auto">
       <div class="card">
-        <div class="card-header">&#128214; 大纲规划</div>
+        <div class="card-header">&#128214; 大纲规划 <span style="margin-left:auto;font-size:12px;font-weight:400"><button class="btn btn-ghost btn-sm" onclick="editBookSettings('${currentBook.id}')">&#9881; 书籍设置</button></span></div>
         <div class="form-desc">创作流程：<b>1) 生成故事大纲</b> → <b>2) 审阅并编辑</b> → <b>3) 生成章节大纲</b> → <b>4) 可修改每章大纲、手动添加事件</b>。大纲确定后才能开始写作。</div>
         <div class="tab-bar">
           <div class="tab-item ${step4SubTab==='outline'?'active':''}" onclick="step4SubTab='outline';loadStep4()">&#128203; 故事大纲 ${hasOutline?'&#10003;':''}</div>
@@ -1985,6 +2109,7 @@ function renderStep4ChOutlines() {
       </div>
     </div>`;
   }
+  if (typeof chOutlineEditingIdx === 'undefined') window.chOutlineEditingIdx = -1;
   return `
     <div class="toolbar">
       <button class="btn btn-primary" onclick="aiGenChapterOutlines()">重新生成</button>
@@ -1992,39 +2117,128 @@ function renderStep4ChOutlines() {
       <button class="btn" onclick="showImportChOutlinesModal()">&#128229; 导入章纲</button>
       <button class="btn btn-success" onclick="unlockStep(5);goStep(5)">大纲确定，开始写作 &#8250;</button>
     </div>
-    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">共 ${cos.length} 章。点击章节可编辑，或使用 AI 续写追加新章节。</div>
-    ${cos.map((co, i) => `
-      <div class="seq-item" style="cursor:pointer;gap:8px" onclick="editChOutline(${i})">
-        <div style="font-size:11px;color:var(--purple);min-width:40px;font-weight:600">Ch.${co.chapter_number || co.chapter || i+1}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:12px">${esc(co.title || '未命名')}</div>
-          <div style="font-size:11px;color:var(--text3);margin-top:2px">${esc(co.summary || co.purpose || '')}</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">共 ${cos.length} 章。点击章节展开编辑，修改后点保存。</div>
+    ${cos.map((co, i) => {
+      const chNum = co.chapter_number || co.chapter || i+1;
+      const isActive = chOutlineEditingIdx === i;
+      const beats = co.beats || [];
+      return `
+      <div class="co-item ${isActive?'active':''}" id="co-item-${i}">
+        <div class="co-header" onclick="toggleChOutlineEdit(${i})">
+          <span class="co-arrow">&#9654;</span>
+          <span class="co-num">Ch.${chNum}</span>
+          <span class="co-title">${esc(co.title || '未命名')}</span>
+          <span class="co-info">${co.target_words || co.word_target || '-'}字${beats.length ? ' · '+beats.length+'拍':''}</span>
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteChOutline(${i})" title="删除">&#128465;</button>
         </div>
-        <div style="font-size:11px;color:var(--text3)">${co.target_words || co.word_target || '-'}字</div>
-        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteChOutline(${i})" title="删除">&#128465;</button>
-      </div>
-    `).join('')}
+        <div class="co-body">
+          <div class="co-field">
+            <label>章节标题</label>
+            <input id="co-title-${i}" value="${esc(co.title||'')}" placeholder="章节标题">
+          </div>
+          <div class="co-field">
+            <label>章节摘要</label>
+            <textarea id="co-summary-${i}" rows="4" placeholder="本章主要剧情">${esc(co.summary || co.purpose || '')}</textarea>
+          </div>
+          <div class="co-row-2">
+            <div class="co-field">
+              <label>视角角色 (POV)</label>
+              <input id="co-pov-${i}" value="${esc(co.pov||'')}" placeholder="如：林婉儿">
+            </div>
+            <div class="co-field">
+              <label>目标字数</label>
+              <input id="co-words-${i}" type="number" value="${co.target_words || co.word_target || 4000}" style="width:100%">
+            </div>
+          </div>
+          <div class="co-row-2">
+            <div class="co-field">
+              <label>情感弧线 - 起</label>
+              <input id="co-emo-start-${i}" value="${esc(co.emotional_arc?.start||'')}" placeholder="如：平静">
+            </div>
+            <div class="co-field">
+              <label>情感弧线 - 终</label>
+              <input id="co-emo-end-${i}" value="${esc(co.emotional_arc?.end||'')}" placeholder="如：紧张">
+            </div>
+          </div>
+          <div class="co-field">
+            <label>写作基调</label>
+            <input id="co-notes-${i}" value="${esc(co.writing_notes||'')}" placeholder="本章写作风格或基调指导（可选）">
+          </div>
+          ${beats.length ? `
+          <div class="co-field">
+            <label>节拍 (${beats.length})</label>
+            <ul class="co-beats-list">
+              ${beats.map((b, bi) => `
+                <li style="flex-direction:column;gap:2px">
+                  <div style="display:flex;gap:8px;align-items:center">
+                    <span class="beat-desc">${esc(b.description || b)}</span>
+                    ${b.dramatic_function ? `<span class="beat-func">${esc(b.dramatic_function)}</span>` : ''}
+                  </div>
+                  ${b.detail ? `<div style="font-size:11px;color:var(--text2);padding-left:2px;line-height:1.6">${esc(b.detail)}</div>` : ''}
+                </li>
+              `).join('')}
+            </ul>
+          </div>` : ''}
+          ${co.mandatory_tasks?.length ? `
+          <div class="co-field">
+            <label>必须完成的任务</label>
+            <div style="font-size:12px;color:var(--text2)">${co.mandatory_tasks.map(t => esc(t)).join('、')}</div>
+          </div>` : ''}
+          ${co.weapon_tech_notes ? `
+          <div class="co-field">
+            <label>武器/技术备注</label>
+            <textarea id="co-weapon-${i}" rows="6" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text);resize:vertical">${esc(JSON.stringify(co.weapon_tech_notes, null, 2))}</textarea>
+          </div>` : ''}
+          <div class="co-actions">
+            <button class="btn btn-primary btn-sm" onclick="saveChOutlineInline(${i})">&#128190; 保存修改</button>
+            <button class="btn btn-sm" onclick="toggleChOutlineEdit(${i})">收起</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
     <div style="text-align:center;margin-top:12px">
       <button class="btn btn-warning btn-sm" onclick="aiContinueChOutlines()">+ AI 续写新章节</button>
       <button class="btn btn-sm" onclick="addChOutlineManual()" style="margin-left:8px">+ 手动添加章节</button>
     </div>`;
 }
 
-function editChOutline(idx) {
+function toggleChOutlineEdit(idx) {
+  window.chOutlineEditingIdx = window.chOutlineEditingIdx === idx ? -1 : idx;
+  loadStep4();
+  // 展开后滚动到该章节
+  if (window.chOutlineEditingIdx >= 0) {
+    setTimeout(() => {
+      const el = document.getElementById('co-item-' + idx);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 50);
+  }
+}
+
+async function saveChOutlineInline(idx) {
   const co = chapterOutlinesCache[idx];
   if (!co) return;
-  const newTitle = prompt('章节标题：', co.title || '');
-  if (newTitle === null) return;
-  const newSummary = prompt('章节摘要：', co.summary || co.purpose || '');
-  if (newSummary === null) return;
-  chapterOutlinesCache[idx].title = newTitle;
-  chapterOutlinesCache[idx].summary = newSummary;
-  // 保存
-  api(`/books/${currentBook.id}/chapter-outlines`, {
-    method: 'PUT', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ outlines: chapterOutlinesCache }),
-  }).then(() => toast('已更新', true)).catch(e => toast(e.message, false));
-  loadStep4();
+  co.title = document.getElementById('co-title-' + idx)?.value || co.title;
+  co.summary = document.getElementById('co-summary-' + idx)?.value || co.summary;
+  co.pov = document.getElementById('co-pov-' + idx)?.value || '';
+  co.target_words = parseInt(document.getElementById('co-words-' + idx)?.value) || co.target_words || 4000;
+  const emoStart = document.getElementById('co-emo-start-' + idx)?.value || '';
+  const emoEnd = document.getElementById('co-emo-end-' + idx)?.value || '';
+  co.emotional_arc = { start: emoStart, end: emoEnd };
+  co.writing_notes = document.getElementById('co-notes-' + idx)?.value || '';
+  // 保留 weapon_tech_notes（如有编辑框则回写）
+  const weaponEl = document.getElementById('co-weapon-' + idx);
+  if (weaponEl && co.weapon_tech_notes) {
+    try { co.weapon_tech_notes = JSON.parse(weaponEl.value); } catch {}
+  }
+  try {
+    await api(`/books/${currentBook.id}/chapter-outlines`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ outlines: chapterOutlinesCache }),
+    });
+    bookData.chapterOutlines = chapterOutlinesCache;
+    toast('章节大纲已保存', true);
+    loadStep4();
+  } catch (e) { toast('保存失败: ' + e.message, false); }
 }
 
 async function aiGenChapterOutlines() {
@@ -2139,6 +2353,7 @@ function loadStep5() {
         <div class="metric"><div class="metric-label">总字数</div><div class="metric-value">${(totalWords/10000).toFixed(1)}<span style="font-size:14px">万</span></div><div class="metric-sub">${chapters.length?Math.round(totalWords/chapters.length):0}字/章</div></div>
         <div class="metric"><div class="metric-label">未闭合伏笔</div><div class="metric-value" style="color:${hooks.filter(h=>h.status==='open').length>5?'var(--yellow)':'var(--green)'}">${hooks.filter(h=>h.status==='open').length}</div></div>
         <div class="metric"><div class="metric-label">因果节点</div><div class="metric-value" style="color:var(--purple)">${causal.length}</div></div>
+        <div class="metric" style="cursor:pointer" onclick="editBookSettings('${currentBook.id}')" title="修改书籍设置"><div class="metric-label">书籍设置</div><div class="metric-value" style="font-size:16px">&#9881;</div><div class="metric-sub">点击修改</div></div>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
@@ -2270,6 +2485,8 @@ function selectWritingChapter(idx) {
     el.style.borderLeft = i === idx ? '3px solid var(--blue)' : '';
     el.style.background = i === idx ? 'var(--bg2)' : '';
   });
+  // 自动加载已有细纲（如果已生成过）
+  loadExistingDetailedOutline(chNum);
 }
 
 async function saveChapterOutline(idx) {
@@ -2287,6 +2504,45 @@ async function saveChapterOutline(idx) {
   } catch (e) { toast('保存失败: ' + e.message, false); }
 }
 
+async function loadExistingDetailedOutline(chNum) {
+  const area = document.getElementById('detail-outline-area');
+  if (!area) return;
+  try {
+    const res = await api(`/books/${currentBook.id}/detailed-outline/${chNum}`);
+    window._currentDetailedOutline = res;
+    renderDetailedOutline(res);
+  } catch {
+    // 细纲尚未生成，保持空白
+    window._currentDetailedOutline = null;
+  }
+}
+
+function renderDetailedOutline(d) {
+  const area = document.getElementById('detail-outline-area');
+  if (!area || !d) return;
+  area.innerHTML = `
+    <div class="card" style="padding:12px;background:var(--bg2);margin-top:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600;color:var(--purple)">&#10024; 细纲：${esc(d.title || '')}</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-sm" onclick="editDetailedOutline()">&#9998; 编辑</button>
+          <button class="btn btn-sm" onclick="genDetailedOutline(${d.chapter_number})">&#128260; 重新生成</button>
+        </div>
+      </div>
+      <div style="font-size:11px;margin-bottom:8px">${esc(d.detailed_summary || '')}</div>
+      ${d.scenes?.length ? `<div style="font-size:11px;margin-bottom:6px"><b>场景拆分 (${d.scenes.length})：</b></div>
+        ${d.scenes.map((s, si) => `<div style="background:var(--bg);border-radius:6px;padding:8px;margin-bottom:6px">
+          <div style="font-size:11px;font-weight:600">${esc(s.scene_title || '场景'+(si+1))} <span style="color:var(--text3);font-weight:normal">[${esc(s.location||'')}] ${esc(s.word_budget||'')+'字'}</span></div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">目标：${esc(s.goal||'')}</div>
+          <div style="font-size:11px;color:var(--text3)">冲突：${esc(s.conflict||'')}</div>
+          ${s.beats?.length ? `<div style="font-size:10px;color:var(--purple);margin-top:2px">节拍：${s.beats.map(b=>esc(b)).join(' → ')}</div>` : ''}
+        </div>`).join('')}` : ''}
+      ${d.hooks_to_plant?.length ? `<div style="font-size:10px;color:var(--yellow);margin-top:4px">&#128279; 埋伏笔：${d.hooks_to_plant.map(h=>esc(h)).join('、')}</div>` : ''}
+      ${d.hooks_to_advance?.length ? `<div style="font-size:10px;color:var(--blue);margin-top:2px">&#128260; 推伏笔：${d.hooks_to_advance.map(h=>esc(h)).join('、')}</div>` : ''}
+      ${d.chapter_end_hook ? `<div style="font-size:10px;color:var(--green);margin-top:2px">&#127919; 结尾钩子：${esc(d.chapter_end_hook)}</div>` : ''}
+    </div>`;
+}
+
 async function genDetailedOutline(chNum) {
   const area = document.getElementById('detail-outline-area');
   if (!area) return;
@@ -2301,23 +2557,7 @@ async function genDetailedOutline(chNum) {
     if (!res.ok) { toast('细纲生成失败', false); area.innerHTML = ''; return; }
     const d = res.data;
     window._currentDetailedOutline = d;
-    area.innerHTML = `
-      <div class="card" style="padding:12px;background:var(--bg2);margin-top:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <span style="font-size:12px;font-weight:600">细纲：${esc(d.title || '')}</span>
-          <button class="btn btn-sm" onclick="editDetailedOutline()">编辑</button>
-        </div>
-        <div style="font-size:11px;margin-bottom:8px">${esc(d.detailed_summary || '')}</div>
-        ${d.scenes?.length ? `<div style="font-size:11px;margin-bottom:6px"><b>场景拆分 (${d.scenes.length})：</b></div>
-          ${d.scenes.map((s, si) => `<div style="background:var(--bg);border-radius:6px;padding:8px;margin-bottom:6px">
-            <div style="font-size:11px;font-weight:600">${esc(s.scene_title || '场景'+(si+1))} <span style="color:var(--text3);font-weight:normal">[${esc(s.location||'')}] ${esc(s.word_budget||'')+'字'}</span></div>
-            <div style="font-size:11px;color:var(--text3);margin-top:2px">目标：${esc(s.goal||'')}</div>
-            <div style="font-size:11px;color:var(--text3)">冲突：${esc(s.conflict||'')}</div>
-            ${s.beats?.length ? `<div style="font-size:10px;color:var(--purple);margin-top:2px">节拍：${s.beats.map(b=>esc(b)).join(' → ')}</div>` : ''}
-          </div>`).join('')}` : ''}
-        ${d.hooks_to_plant?.length ? `<div style="font-size:10px;color:var(--yellow);margin-top:4px">埋伏笔：${d.hooks_to_plant.map(h=>esc(h)).join('、')}</div>` : ''}
-        ${d.chapter_end_hook ? `<div style="font-size:10px;color:var(--green);margin-top:2px">结尾钩子：${esc(d.chapter_end_hook)}</div>` : ''}
-      </div>`;
+    renderDetailedOutline(d);
     toast('细纲已生成', true);
   } catch (e) { toast('细纲生成失败: ' + e.message, false); area.innerHTML = ''; }
 }
@@ -2326,21 +2566,44 @@ function editDetailedOutline() {
   const d = window._currentDetailedOutline;
   if (!d) return;
   const area = document.getElementById('detail-outline-area');
+  const scenesJson = JSON.stringify(d.scenes || [], null, 2);
   area.innerHTML = `
     <div class="card" style="padding:12px;background:var(--bg2);margin-top:8px">
+      <div style="font-size:12px;font-weight:600;color:var(--purple);margin-bottom:10px">&#9998; 编辑细纲</div>
       <div class="form-group" style="margin-bottom:8px">
-        <label class="form-label" style="font-size:11px">详细摘要（可编辑）</label>
+        <label class="form-label" style="font-size:11px">详细摘要</label>
         <textarea class="form-textarea" id="ed-detail-summary" rows="4" style="font-size:12px">${esc(d.detailed_summary || '')}</textarea>
       </div>
       <div class="form-group" style="margin-bottom:8px">
+        <label class="form-label" style="font-size:11px">场景列表（JSON 格式，可编辑场景标题、地点、目标、冲突、节拍等）</label>
+        <textarea class="form-textarea" id="ed-detail-scenes" rows="10" style="font-size:11px;font-family:monospace">${esc(scenesJson)}</textarea>
+        <div class="form-hint">修改时保持 JSON 格式正确。每个场景可包含：scene_title, location, characters, time_marker, goal, conflict, beats, emotional_shift, dialogue_notes, ending, word_budget</div>
+      </div>
+      <div class="form-row" style="margin-bottom:8px">
+        <div class="form-group">
+          <label class="form-label" style="font-size:11px">要埋下的伏笔（每行一个）</label>
+          <textarea class="form-textarea" id="ed-detail-plant" rows="2" style="font-size:11px">${esc((d.hooks_to_plant||[]).join('\n'))}</textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size:11px">要推进的伏笔（每行一个）</label>
+          <textarea class="form-textarea" id="ed-detail-advance" rows="2" style="font-size:11px">${esc((d.hooks_to_advance||[]).join('\n'))}</textarea>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:10px">
         <label class="form-label" style="font-size:11px">结尾钩子</label>
         <input class="form-input" id="ed-detail-hook" value="${esc(d.chapter_end_hook || '')}" style="font-size:12px">
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-sm" onclick="saveDetailedOutline()">保存修改</button>
-        <button class="btn btn-sm" onclick="genDetailedOutline(${d.chapter_number})">重新生成</button>
+        <button class="btn btn-sm btn-primary" onclick="saveDetailedOutline()">&#128190; 保存修改</button>
+        <button class="btn btn-sm" onclick="cancelEditDetailedOutline()">取消</button>
+        <button class="btn btn-sm" onclick="genDetailedOutline(${d.chapter_number})">&#128260; 重新生成</button>
       </div>
     </div>`;
+}
+
+function cancelEditDetailedOutline() {
+  const d = window._currentDetailedOutline;
+  if (d) renderDetailedOutline(d);
 }
 
 async function saveDetailedOutline() {
@@ -2348,11 +2611,23 @@ async function saveDetailedOutline() {
   if (!d) return;
   d.detailed_summary = document.getElementById('ed-detail-summary').value;
   d.chapter_end_hook = document.getElementById('ed-detail-hook').value;
+  // 解析场景 JSON
+  try {
+    const scenesText = document.getElementById('ed-detail-scenes').value;
+    d.scenes = JSON.parse(scenesText);
+  } catch (e) {
+    toast('场景 JSON 格式错误：' + e.message, false);
+    return;
+  }
+  // 解析伏笔
+  d.hooks_to_plant = document.getElementById('ed-detail-plant').value.split('\n').map(s => s.trim()).filter(Boolean);
+  d.hooks_to_advance = document.getElementById('ed-detail-advance').value.split('\n').map(s => s.trim()).filter(Boolean);
   try {
     await api(`/books/${currentBook.id}/detailed-outline/${d.chapter_number}`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(d),
     });
+    renderDetailedOutline(d);
     toast('细纲已保存', true);
   } catch (e) { toast('保存失败: ' + e.message, false); }
 }
@@ -2586,7 +2861,7 @@ function loadStep6() {
       <!-- 左侧：控制面板 + 故事数据 -->
       <div style="width:340px;flex-shrink:0">
         <div class="card" style="margin-bottom:12px">
-          <div class="card-header">&#128269; 审计控制</div>
+          <div class="card-header">&#128269; 审计控制 <span style="margin-left:auto;font-size:12px;font-weight:400"><button class="btn btn-ghost btn-sm" onclick="editBookSettings('${currentBook.id}')">&#9881; 设置</button></span></div>
           <div class="form-row" style="margin-bottom:8px">
             <div class="form-group"><label class="form-label">审计章节</label>
               <select class="form-select" id="audit-chapter">
@@ -3096,6 +3371,9 @@ function loadStep7() {
           <div>总字数：<b style="color:var(--text)">${(totalWords/10000).toFixed(1)} 万字</b></div>
           <div>平均每章：<b style="color:var(--text)">${finals.length?Math.round(totalWords/finals.length):0} 字</b></div>
         </div>
+        <div style="margin-top:12px;text-align:right">
+          <button class="btn btn-sm btn-ghost" onclick="editBookSettings('${currentBook.id}')">&#9881; 修改书籍设置</button>
+        </div>
       </div>
       <div style="text-align:center;margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-primary btn-lg" onclick="doExport('md')">导出为 Markdown</button>
@@ -3218,12 +3496,17 @@ async function loadSettingsPage() {
         </div>
         <div class="form-row" style="margin-top:12px">
           <div class="form-group"><label class="form-label">默认温度</label><input class="form-input" id="sp-temp" type="number" step="0.1" value="${s.default_temperature}"></div>
+          <div class="form-group"><label class="form-label">最大输出 Token</label><input class="form-input" id="sp-max-tokens" type="number" step="1" min="1" max="131072" value="${s.max_tokens||8192}"><div class="form-hint">DeepSeek 建议 8192</div></div>
+        </div>
+        <div class="form-row" style="margin-top:12px">
           <div class="form-group"><label class="form-label">审计模型</label><input class="form-input" id="sp-auditor" value="${s.auditor_model||''}" placeholder="留空用主模型"></div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:16px">
+        <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="saveSettingsFromPage()">保存</button>
+          <button class="btn" onclick="testLLMConnection('settings')" id="sp-test-btn">&#128268; 测试连接</button>
           <button class="btn" onclick="goStep(currentStep)">返回</button>
         </div>
+        <div id="sp-test-result" style="margin-top:8px;font-size:13px"></div>
       </div>
     </div>`;
 }
@@ -3254,6 +3537,7 @@ async function saveSettingsFromPage() {
       ollama_base_url: document.getElementById('sp-ol-url').value,
       ollama_model: document.getElementById('sp-ol-model').value,
       default_temperature: document.getElementById('sp-temp').value,
+      max_tokens: document.getElementById('sp-max-tokens').value,
       auditor_model: document.getElementById('sp-auditor').value,
       custom_base_url: isOpenAICompatible ? document.getElementById('sp-cust-url').value : '',
       custom_api_key: isOpenAICompatible ? document.getElementById('sp-cust-key').value : '',
