@@ -759,6 +759,8 @@ function loadStep2() {
   p.innerHTML = `
     <div class="toolbar" style="justify-content:center">
       <button class="btn btn-primary" onclick="showCreateBookModal()">+ 创建新书</button>
+      <button class="btn" onclick="document.getElementById('import-sc-file').click()" title="从 StoryCanvas .storycanvas 文件导入项目">&#128230; 导入项目</button>
+      <input type="file" id="import-sc-file" accept=".storycanvas,.zip" style="display:none" onchange="importStoryCanvas(this)">
       <button class="btn btn-success" onclick="batchAutoGenerateThreads()" title="为所有已有章节大纲的书籍自动生成线程">&#9889; 批量生成线程</button>
     </div>
     <div style="max-width:600px;margin:0 auto">
@@ -2424,6 +2426,10 @@ function loadStep5() {
         ${renderChapters()}
       </div>
     </div>`;
+  // 恢复之前选中的章节（含细纲）
+  if (writingChapterIdx !== null && cos.length > 0 && writingChapterIdx < cos.length) {
+    selectWritingChapter(writingChapterIdx);
+  }
 }
 
 function selectWritingChapter(idx) {
@@ -3378,6 +3384,7 @@ function loadStep7() {
       <div style="text-align:center;margin-top:20px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-primary btn-lg" onclick="doExport('md')">导出为 Markdown</button>
         <button class="btn btn-lg" style="background:var(--bg2);color:var(--text);border:1px solid var(--border)" onclick="doExport('txt')">导出为 TXT</button>
+        <button class="btn btn-lg" style="background:#6c5ce7;color:#fff;border:none" onclick="exportStoryCanvas()">&#128230; 导出 StoryCanvas</button>
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:8px;text-align:center">保存在 books/${currentBook.id}/ 目录</div>
       <div id="export-log" style="margin-top:16px"></div>
@@ -3396,6 +3403,57 @@ async function doExport(fmt) {
     if (res.ok) { toast('导出完成', true); log.innerHTML = `<div style="color:var(--green);font-size:12px">${esc(res.stdout||'导出成功')}</div>`; }
     else { toast('导出失败', false); log.innerHTML = `<div style="color:var(--red);font-size:12px">${esc(res.stderr||'未知错误')}</div>`; }
   } catch (e) { toast('导出失败: ' + (e.message || JSON.stringify(e)), false); }
+}
+
+// ── StoryCanvas 导入/导出 ──────────────────────────────────────────────────
+
+async function exportStoryCanvas() {
+  if (!currentBook) return toast('请先选择书籍', false);
+  try {
+    const resp = await fetch(`/api/books/${currentBook.id}/export-storycanvas`);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || '导出失败');
+    }
+    const blob = await resp.blob();
+    const cd = resp.headers.get('content-disposition');
+    let filename = `${currentBook.title || currentBook.id}.storycanvas`;
+    if (cd) {
+      const m = cd.match(/filename="?([^"]+)"?/);
+      if (m) filename = m[1];
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    toast(`已导出 ${filename}`, true);
+  } catch (e) { toast('StoryCanvas 导出失败: ' + e.message, false); }
+}
+
+async function importStoryCanvas(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  input.value = '';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch('/api/import-storycanvas', { method: 'POST', body: fd });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || '导入失败');
+    }
+    const res = await resp.json();
+    if (res.ok) {
+      const imp = res.imported;
+      toast(`项目「${res.title}」导入成功！角色${imp.characters}个 · 势力${imp.factions}个 · 事件${imp.events}个 · 章节${imp.chapters}章`, true);
+      await loadBooks();
+      selectBookAndLoad(res.book_id);
+      goStep(3);
+    } else {
+      throw new Error(res.message || '导入失败');
+    }
+  } catch (e) { toast('导入失败: ' + e.message, false); }
 }
 
 // ── 渲染器（复用） ───────────────────────────────────────────────────────

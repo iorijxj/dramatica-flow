@@ -3452,3 +3452,571 @@ def action_export(req: ExportRequest):
         return {"ok": result.returncode == 0, "stdout": result.stdout[-2000:], "stderr": result.stderr[-1000:]}
     except subprocess.TimeoutExpired:
         return {"ok": False, "stdout": "", "stderr": "导出超时"}
+
+
+# ── StoryCanvas 导入/导出 ────────────────────────────────────────────────────
+
+import uuid
+import zipfile
+import tempfile
+from fastapi import UploadFile, File
+
+
+@app.get("/api/books/{book_id}/export-storycanvas")
+def export_storycanvas(book_id: str):
+    """将 Dramatica-Flow 项目导出为 .storycanvas 格式（ZIP 包）"""
+    sm = _sm(book_id)
+    try:
+        config = sm.read_config()
+    except FileNotFoundError:
+        raise HTTPException(404, f"书籍不存在：{book_id}")
+
+    ws = sm.read_world_state()
+
+    blocks = []
+    connections = []
+
+    setup_dir = sm.book_dir / "setup"
+
+    characters_data = {}
+    if (setup_dir / "characters.json").exists():
+        try:
+            raw = json.loads((setup_dir / "characters.json").read_text(encoding="utf-8"))
+            characters_data = raw
+        except Exception:
+            pass
+
+    char_list = characters_data.get("characters", []) if isinstance(characters_data, dict) else []
+    char_id_map = {}
+
+    for ch in char_list:
+        if not isinstance(ch, dict):
+            continue
+        cid = ch.get("id", str(uuid.uuid4()))
+        block_id = str(uuid.uuid4())
+        char_id_map[cid] = block_id
+        role = ch.get("role", "supporting")
+        on_canvas = role in ("protagonist", "主角")
+        need_data = ch.get("need", {})
+        external = need_data.get("external", "") if isinstance(need_data, dict) else str(need_data)
+        internal = need_data.get("internal", "") if isinstance(need_data, dict) else ""
+        personality_list = ch.get("personality", [])
+        personality_str = "、".join(personality_list) if isinstance(personality_list, list) else str(personality_list)
+        appearance = ch.get("profile", "") or ch.get("backstory", "")
+        blocks.append({
+            "id": block_id,
+            "project_id": book_id,
+            "type": "CHARACTER",
+            "canvas_x": 100 + len(blocks) * 20,
+            "canvas_y": 100 + len(blocks) * 30,
+            "canvas_w": 280,
+            "collapsed": False,
+            "color": None,
+            "timeline_id": None,
+            "chapter_pos": None,
+            "tags": "[]",
+            "notes": "",
+            "on_canvas": on_canvas,
+            "is_draft": False,
+            "content": {
+                "name": ch.get("name", ""),
+                "want": external,
+                "need": internal,
+                "role_archetype": role,
+                "surface_personality": personality_str,
+                "appearance": appearance,
+                "arc": ch.get("arc", ""),
+                "behavior_lock": ch.get("behavior_lock", []),
+            },
+            "save_status": "saved",
+        })
+
+    world_data = {}
+    if (setup_dir / "world.json").exists():
+        try:
+            world_data = json.loads((setup_dir / "world.json").read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    world_name = config.get("title", book_id) + "世界观"
+    rules = []
+    if isinstance(world_data, dict):
+        for r in world_data.get("rules", []):
+            if isinstance(r, dict):
+                rules.append(r.get("description", r.get("rule", str(r))))
+            else:
+                rules.append(str(r))
+
+    worldview_block_id = str(uuid.uuid4())
+    blocks.append({
+        "id": worldview_block_id,
+        "project_id": book_id,
+        "type": "WORLDVIEW",
+        "canvas_x": 500,
+        "canvas_y": 50,
+        "canvas_w": 280,
+        "collapsed": False,
+        "color": None,
+        "timeline_id": None,
+        "chapter_pos": None,
+        "tags": "[]",
+        "notes": "",
+        "on_canvas": True,
+        "is_draft": False,
+        "content": {
+            "world_name": world_name,
+            "fundamental_rules": rules,
+        },
+        "save_status": "saved",
+    })
+
+    factions = world_data.get("factions", []) if isinstance(world_data, dict) else []
+    for fac in factions:
+        if not isinstance(fac, dict):
+            continue
+        fac_block_id = str(uuid.uuid4())
+        blocks.append({
+            "id": fac_block_id,
+            "project_id": book_id,
+            "type": "FACTION",
+            "canvas_x": 500 + len(blocks) * 15,
+            "canvas_y": 400 + len(blocks) * 10,
+            "canvas_w": 280,
+            "collapsed": False,
+            "color": None,
+            "timeline_id": None,
+            "chapter_pos": None,
+            "tags": "[]",
+            "notes": "",
+            "on_canvas": False,
+            "is_draft": False,
+            "content": {
+                "name": fac.get("name", ""),
+                "ideology": fac.get("description", fac.get("stance", "")),
+            },
+            "save_status": "saved",
+        })
+        connections.append({
+            "id": str(uuid.uuid4()),
+            "from_block": worldview_block_id,
+            "to_block": fac_block_id,
+            "conn_type": "contains",
+            "label": "",
+            "chapter_hint": None,
+        })
+
+    events_data = {}
+    if (setup_dir / "events.json").exists():
+        try:
+            events_data = json.loads((setup_dir / "events.json").read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    event_list = events_data.get("events", []) if isinstance(events_data, dict) else []
+    for evt in event_list:
+        if not isinstance(evt, dict):
+            continue
+        evt_block_id = str(uuid.uuid4())
+        blocks.append({
+            "id": evt_block_id,
+            "project_id": book_id,
+            "type": "EVENT",
+            "canvas_x": 100 + len(blocks) * 12,
+            "canvas_y": 500 + len(blocks) * 8,
+            "canvas_w": 280,
+            "collapsed": False,
+            "color": None,
+            "timeline_id": None,
+            "chapter_pos": None,
+            "tags": "[]",
+            "notes": "",
+            "on_canvas": False,
+            "is_draft": False,
+            "content": {
+                "title": evt.get("name", ""),
+                "what_happens": evt.get("description", ""),
+                "suggested_act": evt.get("suggested_act"),
+                "suggested_function": evt.get("suggested_function", ""),
+            },
+            "save_status": "saved",
+        })
+
+    for hook in ws.pending_hooks:
+        hook_block_id = str(uuid.uuid4())
+        hook_type = "HOOK" if hook.type.value in ("promise", "conflict") else "FORESHADOW"
+        blocks.append({
+            "id": hook_block_id,
+            "project_id": book_id,
+            "type": hook_type,
+            "canvas_x": 800 + len(blocks) * 10,
+            "canvas_y": 100 + len(blocks) * 8,
+            "canvas_w": 280,
+            "collapsed": False,
+            "color": None,
+            "timeline_id": None,
+            "chapter_pos": None,
+            "tags": "[]",
+            "notes": "",
+            "on_canvas": False,
+            "is_draft": False,
+            "content": {
+                "title": hook.description[:50] if hook.description else "",
+                "hook_type": hook.type.value,
+                "description": hook.description,
+                "urgency": 5,
+                "status": hook.status.value,
+                "plant_chapter": hook.planted_in_chapter,
+                "payoff_chapter": hook.resolved_in_chapter,
+            },
+            "save_status": "saved",
+        })
+
+    for rel in ws.relationships:
+        rel_block_id = str(uuid.uuid4())
+        blocks.append({
+            "id": rel_block_id,
+            "project_id": book_id,
+            "type": "RELATIONSHIP",
+            "canvas_x": 800,
+            "canvas_y": 400 + len(blocks) * 8,
+            "canvas_w": 280,
+            "collapsed": False,
+            "color": None,
+            "timeline_id": None,
+            "chapter_pos": None,
+            "tags": "[]",
+            "notes": "",
+            "on_canvas": False,
+            "is_draft": False,
+            "content": {
+                "character_a_id": rel.character_a,
+                "character_b_id": rel.character_b,
+                "relationship_type": rel.type.value,
+                "strength": rel.strength,
+            },
+            "save_status": "saved",
+        })
+
+    metadata = {
+        "storycanvas_version": "1.0",
+        "project_id": book_id,
+        "title": config.get("title", book_id),
+        "created_at": config.get("created_at", ""),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "stats": {
+            "total_blocks": len(blocks),
+            "total_chapters": ws.current_chapter,
+            "total_words": 0,
+        },
+        "app_info": {
+            "platform": "Dramatica-Flow",
+            "version": "0.4.0",
+        },
+    }
+
+    canvas = {
+        "viewport": {"x": 0, "y": 0, "zoom": 1.0},
+        "timeline_layout": {},
+        "blocks": blocks,
+        "connections": connections,
+    }
+
+    style_sig = {}
+    if config.get("style_guide"):
+        style_sig = {
+            "style_guide": config["style_guide"],
+            "forbidden_words": config.get("custom_forbidden_words", []),
+        }
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".storycanvas", prefix=config.get("title", book_id))
+    tmp_path = tmp.name
+    tmp.close()
+
+    with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
+        zf.writestr("canvas.json", json.dumps(canvas, ensure_ascii=False, indent=2))
+        if style_sig:
+            zf.writestr("style_signature.json", json.dumps(style_sig, ensure_ascii=False, indent=2))
+
+        for f in sm.chapter_dir.glob("*_final.md"):
+            ch_num_match = re.match(r"ch(\d+)_final\.md", f.name)
+            if ch_num_match:
+                ch_num = int(ch_num_match.group(1))
+                zf.writestr(f"chapters/chapter_{ch_num:03d}.md", f.read_text(encoding="utf-8"))
+
+    from fastapi.responses import Response
+    from urllib.parse import quote
+    filename = f"{config.get('title', book_id)}.storycanvas"
+    encoded_filename = quote(filename)
+    ascii_fallback = f"export_{book_id}.storycanvas"
+    try:
+        ascii_fallback.encode('latin-1')
+    except UnicodeEncodeError:
+        ascii_fallback = "export.storycanvas"
+
+    with open(tmp_path, "rb") as f:
+        file_bytes = f.read()
+
+    return Response(
+        content=file_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=\"{ascii_fallback}\"; filename*=UTF-8''{encoded_filename}"},
+    )
+
+
+@app.post("/api/import-storycanvas")
+async def import_storycanvas(file: UploadFile = File(...)):
+    """从 .storycanvas 文件导入项目到 Dramatica-Flow"""
+    if not file.filename:
+        raise HTTPException(400, "请上传文件")
+
+    content = await file.read()
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".storycanvas")
+    tmp.write(content)
+    tmp.close()
+
+    try:
+        with zipfile.ZipFile(tmp.name, "r") as zf:
+            names = zf.namelist()
+
+            canvas_data = {}
+            if "canvas.json" in names:
+                canvas_data = json.loads(zf.read("canvas.json"))
+            if not isinstance(canvas_data, dict):
+                canvas_data = {}
+
+            metadata = {}
+            if "metadata.json" in names:
+                metadata = json.loads(zf.read("metadata.json"))
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            style_sig = {}
+            if "style_signature.json" in names:
+                style_sig = json.loads(zf.read("style_signature.json"))
+            if not isinstance(style_sig, dict):
+                style_sig = {}
+
+            title = metadata.get("title", "导入项目")
+            book_id = title.replace(" ", "_").replace("/", "_").replace("\\", "_")[:20]
+
+            existing = BOOKS_DIR / book_id
+            if existing.exists():
+                suffix = 1
+                while (BOOKS_DIR / f"{book_id}_{suffix}").exists():
+                    suffix += 1
+                book_id = f"{book_id}_{suffix}"
+
+            from core.state import StateManager
+            from core.types.state import BookConfig
+
+            style_guide = style_sig.get("style_guide", "")
+            forbidden_words = style_sig.get("forbidden_words", [])
+
+            config = BookConfig(
+                id=book_id,
+                title=title,
+                genre="玄幻",
+                target_words_per_chapter=4000,
+                target_chapters=90,
+                protagonist_id="",
+                status="planning",
+                created_at=datetime.now(timezone.utc).isoformat(),
+                custom_forbidden_words=forbidden_words if isinstance(forbidden_words, list) else [],
+                style_guide=style_guide,
+            )
+            sm = StateManager(PROJECT_ROOT, book_id)
+            sm.init(config)
+
+            blocks = canvas_data.get("blocks", [])
+            connections = canvas_data.get("connections", [])
+
+            characters = []
+            locations = []
+            factions = []
+            events = []
+            world_rules = []
+            protagonist_id = ""
+
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type", "")
+                content = block.get("content", {})
+                if isinstance(content, str):
+                    try:
+                        content = json.loads(content)
+                    except (json.JSONDecodeError, ValueError):
+                        content = {}
+                if not isinstance(content, dict):
+                    content = {}
+                on_canvas = block.get("on_canvas", False)
+
+                if btype == "CHARACTER":
+                    cid = block.get("id", str(uuid.uuid4()))[:12]
+                    need_data = content.get("want", "")
+                    internal = content.get("need", "")
+                    personality = content.get("surface_personality", "")
+                    personality_list = [p.strip() for p in personality.split("、") if p.strip()] if personality else []
+                    role = content.get("role_archetype", "supporting")
+                    if role in ("protagonist", "主角") and not protagonist_id:
+                        protagonist_id = cid
+
+                    characters.append({
+                        "id": cid,
+                        "name": content.get("name", "未命名角色"),
+                        "role": role,
+                        "need": {
+                            "external": need_data,
+                            "internal": internal,
+                        },
+                        "personality": personality_list,
+                        "behavior_lock": content.get("behavior_lock", []),
+                        "arc": content.get("arc", ""),
+                        "backstory": content.get("appearance", ""),
+                    })
+
+                elif btype == "WORLDVIEW":
+                    wname = content.get("world_name", "")
+                    rules = content.get("fundamental_rules", [])
+                    world_rules.extend(rules if isinstance(rules, list) else [str(rules)])
+
+                elif btype == "FACTION":
+                    factions.append({
+                        "id": block.get("id", str(uuid.uuid4()))[:12],
+                        "name": content.get("name", "未命名势力"),
+                        "description": content.get("ideology", ""),
+                        "stance": "中立",
+                    })
+
+                elif btype == "EVENT":
+                    events.append({
+                        "id": block.get("id", str(uuid.uuid4()))[:12],
+                        "name": content.get("title", "未命名事件"),
+                        "description": content.get("what_happens", ""),
+                        "suggested_act": content.get("suggested_act", 1),
+                        "suggested_function": content.get("suggested_function", "setup"),
+                        "characters_involved": [],
+                        "dramatic_question": "",
+                    })
+
+                elif btype in ("HOOK", "FORESHADOW"):
+                    events.append({
+                        "id": block.get("id", str(uuid.uuid4()))[:12],
+                        "name": content.get("title", "伏笔"),
+                        "description": content.get("description", ""),
+                        "suggested_act": 1,
+                        "suggested_function": "setup",
+                        "characters_involved": [],
+                        "dramatic_question": "",
+                    })
+
+            setup_dir = sm.book_dir / "setup"
+            setup_dir.mkdir(parents=True, exist_ok=True)
+
+            (setup_dir / "characters.json").write_text(
+                json.dumps({"characters": characters}, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+            world_json = {
+                "locations": locations,
+                "factions": factions,
+                "rules": world_rules,
+            }
+            (setup_dir / "world.json").write_text(
+                json.dumps(world_json, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+            (setup_dir / "events.json").write_text(
+                json.dumps({"events": events}, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+            # 创建 setup_state.json 以便前端识别"世界观已配置"
+            setup_state = {
+                "seed_event_id": events[0]["id"] if events else "",
+                "characters": {},
+                "locations": {},
+                "factions": {},
+                "world_rules": world_rules,
+                "events": {},
+            }
+            for ch in characters:
+                cid = ch["id"]
+                setup_state["characters"][cid] = {
+                    "id": cid,
+                    "name": ch["name"],
+                    "need": ch["need"],
+                    "obstacles": [],
+                    "worldview": {"power": "seeks", "trust": "suspicious", "coping": "fight"},
+                    "arc": ch.get("arc", "positive"),
+                    "profile": ch.get("backstory", ""),
+                    "behavior_lock": ch.get("behavior_lock", []),
+                    "role": ch.get("role", "supporting"),
+                    "personality": ch.get("personality", []),
+                    "backstory": ch.get("backstory", ""),
+                    "current_goal": "",
+                    "hidden_agenda": "",
+                }
+            for fac in factions:
+                fid = fac["id"]
+                setup_state["factions"][fid] = {
+                    "id": fid,
+                    "name": fac["name"],
+                    "description": fac.get("description", ""),
+                    "stance": fac.get("stance", "中立"),
+                }
+            for evt in events:
+                eid = evt["id"]
+                setup_state["events"][eid] = {
+                    "id": eid,
+                    "name": evt["name"],
+                    "description": evt.get("description", ""),
+                    "suggested_act": evt.get("suggested_act", 1),
+                    "suggested_function": evt.get("suggested_function", "setup"),
+                    "characters_involved": evt.get("characters_involved", []),
+                    "dramatic_question": evt.get("dramatic_question", ""),
+                }
+            sm.state_dir.mkdir(parents=True, exist_ok=True)
+            (sm.state_dir / "setup_state.json").write_text(
+                json.dumps(setup_state, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+
+            if protagonist_id:
+                cfg_data = sm.read_config()
+                cfg_data["protagonist_id"] = protagonist_id
+                sm._write_json("config.json", cfg_data)
+
+            chapter_files = sorted([n for n in names if n.startswith("chapters/") and n.endswith(".md")])
+            imported_chapters = 0
+            for ch_file in chapter_files:
+                ch_match = re.search(r"chapter[_\-]?(\d+)", ch_file, re.IGNORECASE)
+                if ch_match:
+                    ch_num = int(ch_match.group(1))
+                    ch_content = zf.read(ch_file).decode("utf-8")
+                    final_path = sm.chapter_dir / f"ch{ch_num:04d}_final.md"
+                    final_path.write_text(ch_content, encoding="utf-8")
+                    imported_chapters += 1
+
+            return {
+                "ok": True,
+                "book_id": book_id,
+                "title": title,
+                "imported": {
+                    "characters": len(characters),
+                    "factions": len(factions),
+                    "events": len(events),
+                    "chapters": imported_chapters,
+                    "world_rules": len(world_rules),
+                },
+            }
+
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "无效的 .storycanvas 文件（不是有效的 ZIP）")
+    except Exception as e:
+        raise HTTPException(500, f"导入失败：{str(e)}")
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
