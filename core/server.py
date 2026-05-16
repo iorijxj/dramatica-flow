@@ -3697,6 +3697,142 @@ def export_storycanvas(book_id: str):
             "save_status": "saved",
         })
 
+    outline_data = None
+    outline_path = sm.state_dir / "outline.json"
+    if outline_path.exists():
+        try:
+            outline_data = json.loads(outline_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    if outline_data and isinstance(outline_data, dict):
+        synopsis_block_id = str(uuid.uuid4())
+        blocks.append({
+            "id": synopsis_block_id,
+            "project_id": book_id,
+            "type": "STORY_SYNOPSIS",
+            "canvas_x": 100,
+            "canvas_y": -100,
+            "canvas_w": 280,
+            "collapsed": False,
+            "color": None,
+            "timeline_id": None,
+            "chapter_pos": None,
+            "tags": "[]",
+            "notes": "",
+            "on_canvas": True,
+            "is_draft": False,
+            "content": {
+                "logline": outline_data.get("logline", ""),
+                "genre": outline_data.get("genre", ""),
+                "emotional_roadmap": outline_data.get("emotional_roadmap", ""),
+            },
+            "save_status": "saved",
+        })
+
+        story_outline_block_id = str(uuid.uuid4())
+        sequences = outline_data.get("sequences", [])
+        act1 = "\n".join(s.get("summary", "") for s in sequences if s.get("act") == 1)
+        act2 = "\n".join(s.get("summary", "") for s in sequences if s.get("act") == 2)
+        act3 = "\n".join(s.get("summary", "") for s in sequences if s.get("act") == 3)
+        key_turning_points = []
+        for s in sequences:
+            for evt in s.get("key_events", []):
+                key_turning_points.append(evt)
+            hook = s.get("end_hook", "")
+            if hook:
+                key_turning_points.append(hook)
+        blocks.append({
+            "id": story_outline_block_id,
+            "project_id": book_id,
+            "type": "STORY_OUTLINE",
+            "canvas_x": 100,
+            "canvas_y": 0,
+            "canvas_w": 280,
+            "collapsed": False,
+            "color": None,
+            "timeline_id": None,
+            "chapter_pos": None,
+            "tags": "[]",
+            "notes": "",
+            "on_canvas": True,
+            "is_draft": False,
+            "content": {
+                "title": outline_data.get("title", config.get("title", book_id)),
+                "logline": outline_data.get("logline", ""),
+                "genre": outline_data.get("genre", ""),
+                "act1_summary": act1,
+                "act2_summary": act2,
+                "act3_summary": act3,
+                "key_turning_points": "；".join(key_turning_points[:10]) if key_turning_points else "",
+                "central_conflict": "",
+                "climax_design": "",
+                "ending_type": "",
+                "emotional_roadmap": outline_data.get("emotional_roadmap", ""),
+            },
+            "save_status": "saved",
+        })
+
+    chapter_outlines_data = None
+    co_path = sm.state_dir / "chapter_outlines.json"
+    if co_path.exists():
+        try:
+            chapter_outlines_data = json.loads(co_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    chapters_json_list = []
+    if chapter_outlines_data and isinstance(chapter_outlines_data, list):
+        for co in chapter_outlines_data:
+            if not isinstance(co, dict):
+                continue
+            ch_num = co.get("chapter_number", 0)
+            co_block_id = str(uuid.uuid4())
+            beats = co.get("beats", [])
+            beat_fields = {}
+            for bi, beat in enumerate(beats[:6], 1):
+                beat_fields[f"beat{bi}_desc"] = beat.get("description", "") if isinstance(beat, dict) else str(beat)
+            blocks.append({
+                "id": co_block_id,
+                "project_id": book_id,
+                "type": "CHAPTER_OUTLINE",
+                "canvas_x": 500 + len(blocks) * 10,
+                "canvas_y": 200 + len(blocks) * 15,
+                "canvas_w": 280,
+                "collapsed": False,
+                "color": None,
+                "timeline_id": None,
+                "chapter_pos": None,
+                "tags": "[]",
+                "notes": "",
+                "on_canvas": True,
+                "is_draft": False,
+                "content": {
+                    "chapter_number": ch_num,
+                    "title": co.get("title", ""),
+                    "summary": co.get("summary", ""),
+                    "narrative_goal": co.get("mandatory_tasks", [""])[0] if co.get("mandatory_tasks") else "",
+                    "dramatic_function": co.get("beats", [{}])[0].get("dramatic_function", "") if beats else "",
+                    "pov_character": "",
+                    "target_words": co.get("target_words", 4000),
+                    "emotional_arc": str(co.get("emotional_arc", "")),
+                    "status": "draft",
+                    **beat_fields,
+                },
+                "save_status": "saved",
+            })
+            chapters_json_list.append({
+                "chapter_num": ch_num,
+                "title": co.get("title", ""),
+                "timeline_id": None,
+                "outline": co.get("summary", ""),
+                "status": "planned",
+                "word_count": 0,
+                "block_refs": [co_block_id],
+                "special_links": [],
+                "audit_result": None,
+            })
+
     metadata = {
         "storycanvas_version": "1.0",
         "project_id": book_id,
@@ -3743,6 +3879,20 @@ def export_storycanvas(book_id: str):
             if ch_num_match:
                 ch_num = int(ch_num_match.group(1))
                 zf.writestr(f"chapters/chapter_{ch_num:03d}.md", f.read_text(encoding="utf-8"))
+                for ci, cj in enumerate(chapters_json_list):
+                    if cj.get("chapter_num") == ch_num:
+                        chapters_json_list[ci]["status"] = "generated"
+                        word_count = len(f.read_text(encoding="utf-8"))
+                        chapters_json_list[ci]["word_count"] = word_count
+                        break
+
+        if chapters_json_list:
+            zf.writestr("chapters.json", json.dumps(chapters_json_list, ensure_ascii=False, indent=2))
+
+        det_dir = sm.state_dir / "detailed_outlines"
+        if det_dir.exists():
+            for det_file in det_dir.glob("ch*.json"):
+                zf.writestr(f"detailed_outlines/{det_file.name}", det_file.read_text(encoding="utf-8"))
 
     from fastapi.responses import Response
     from urllib.parse import quote
@@ -3838,6 +3988,9 @@ async def import_storycanvas(file: UploadFile = File(...)):
             events = []
             world_rules = []
             protagonist_id = ""
+            story_synopsis_data = {}
+            story_outline_data = {}
+            chapter_outline_blocks = []
 
             for block in blocks:
                 if not isinstance(block, dict):
@@ -3911,6 +4064,15 @@ async def import_storycanvas(file: UploadFile = File(...)):
                         "characters_involved": [],
                         "dramatic_question": "",
                     })
+
+                elif btype == "STORY_SYNOPSIS":
+                    story_synopsis_data = content
+
+                elif btype == "STORY_OUTLINE":
+                    story_outline_data = content
+
+                elif btype == "CHAPTER_OUTLINE":
+                    chapter_outline_blocks.append(content)
 
             setup_dir = sm.book_dir / "setup"
             setup_dir.mkdir(parents=True, exist_ok=True)
@@ -3998,6 +4160,89 @@ async def import_storycanvas(file: UploadFile = File(...)):
                     final_path.write_text(ch_content, encoding="utf-8")
                     imported_chapters += 1
 
+            # 导入故事大纲 (outline.json)
+            imported_outline = 0
+            if story_outline_data or story_synopsis_data:
+                outline_obj = {
+                    "id": f"outline_{book_id}",
+                    "title": story_outline_data.get("title", title) if story_outline_data else title,
+                    "logline": story_outline_data.get("logline", "") or story_synopsis_data.get("logline", ""),
+                    "genre": story_outline_data.get("genre", "") or story_synopsis_data.get("genre", ""),
+                    "sequences": [],
+                    "emotional_roadmap": story_outline_data.get("emotional_roadmap", "") or story_synopsis_data.get("emotional_roadmap", ""),
+                }
+                act_summaries = {
+                    1: story_outline_data.get("act1_summary", ""),
+                    2: story_outline_data.get("act2_summary", ""),
+                    3: story_outline_data.get("act3_summary", ""),
+                }
+                for act_num in (1, 2, 3):
+                    summary = act_summaries.get(act_num, "")
+                    if summary:
+                        outline_obj["sequences"].append({
+                            "id": f"seq_act{act_num}",
+                            "number": act_num,
+                            "act": act_num,
+                            "summary": summary,
+                            "narrative_goal": "",
+                            "dramatic_function": "setup" if act_num == 1 else ("turning" if act_num == 2 else "climax"),
+                            "key_events": [],
+                            "estimated_scenes": 0,
+                            "end_hook": "",
+                        })
+                (sm.state_dir / "outline.json").write_text(
+                    json.dumps(outline_obj, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                imported_outline = 1
+
+            # 导入章节大纲 (chapter_outlines.json)
+            imported_chapter_outlines = 0
+            if chapter_outline_blocks:
+                co_list = []
+                for co in sorted(chapter_outline_blocks, key=lambda x: x.get("chapter_number", 0)):
+                    ch_num = co.get("chapter_number", 0)
+                    beats = []
+                    for bi in range(1, 7):
+                        desc = co.get(f"beat{bi}_desc", "")
+                        if desc:
+                            beats.append({
+                                "id": f"beat_{ch_num}_{bi}",
+                                "description": desc,
+                                "dramatic_function": co.get("dramatic_function", "setup") if bi == 1 else "",
+                            })
+                    co_list.append({
+                        "chapter_number": ch_num,
+                        "title": co.get("title", ""),
+                        "summary": co.get("summary", ""),
+                        "sequence_id": "",
+                        "beats": beats,
+                        "emotional_arc": {"start": "", "end": co.get("emotional_arc", "")},
+                        "mandatory_tasks": [co.get("narrative_goal", "")] if co.get("narrative_goal") else [],
+                        "target_words": co.get("target_words", 4000),
+                    })
+                (sm.state_dir / "chapter_outlines.json").write_text(
+                    json.dumps(co_list, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                imported_chapter_outlines = len(co_list)
+
+            # 导入章节细纲 (detailed_outlines/*.json)
+            imported_detailed_outlines = 0
+            det_files = [n for n in names if n.startswith("detailed_outlines/") and n.endswith(".json")]
+            for det_file in det_files:
+                det_match = re.search(r"ch(\d+)", det_file, re.IGNORECASE)
+                if det_match:
+                    try:
+                        det_data = json.loads(zf.read(det_file).decode("utf-8"))
+                        det_dir = sm.state_dir / "detailed_outlines"
+                        det_dir.mkdir(parents=True, exist_ok=True)
+                        det_name = os.path.basename(det_file)
+                        (det_dir / det_name).write_text(
+                            json.dumps(det_data, ensure_ascii=False, indent=2), encoding="utf-8"
+                        )
+                        imported_detailed_outlines += 1
+                    except Exception:
+                        pass
+
             return {
                 "ok": True,
                 "book_id": book_id,
@@ -4008,6 +4253,9 @@ async def import_storycanvas(file: UploadFile = File(...)):
                     "events": len(events),
                     "chapters": imported_chapters,
                     "world_rules": len(world_rules),
+                    "story_outline": imported_outline,
+                    "chapter_outlines": imported_chapter_outlines,
+                    "detailed_outlines": imported_detailed_outlines,
                 },
             }
 
