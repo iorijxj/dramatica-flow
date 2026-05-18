@@ -213,7 +213,7 @@ def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MOD
         raise HTTPException(400, f"请先配置 {provider} 的 API Key")
     base_url = os.environ.get(f"{env_prefix}BASE_URL",
                                os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
-    model = os.environ.get(model_env, os.environ.get(f"{env_prefix}MODEL", os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
+    model = os.environ.get(f"{env_prefix}MODEL", os.environ.get(model_env, os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
     cfg = LLMConfig(api_key=key, base_url=base_url, model=model, temperature=temp, max_tokens=max_tokens)
     return create_provider(cfg)
 
