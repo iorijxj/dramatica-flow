@@ -2390,7 +2390,7 @@ function renderStep4Outline() {
                 <span style="font-size:13px">${esc(s.summary||'')}</span>
                 ${s.dramatic_function?`<span class="badge badge-${s.dramatic_function}">${s.dramatic_function}</span>`:''}
               </div>
-              <div style="font-size:11px;color:var(--text3);margin-top:2px">钩子：${esc(s.end_hook||'')}</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:2px">钩子：${esc(s.end_hook||'')} <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();editHook(${s._idx})" title="编辑钩子" style="font-size:10px;padding:0 4px;vertical-align:middle">&#9998;</button></div>
               <div style="font-size:11px;color:var(--text3)">${esc(s.narrative_goal||'-')} · ${s.estimated_scenes||'-'} 章</div>
             </div>
             <button class="btn btn-ghost btn-sm" onclick="editOutlineSeq(${s._idx})" title="编辑">&#9998;</button>
@@ -2449,21 +2449,60 @@ function editOutlineLogline() {
   loadStep4();
 }
 
+function editHook(idx) {
+  if (!bookData?.outline?.sequences?.[idx]) return;
+  const s = bookData.outline.sequences[idx];
+  const hook = prompt('编辑结尾钩子：', s.end_hook || '');
+  if (hook === null) return;
+  s.end_hook = hook;
+  saveOutline();
+  loadStep4();
+}
+
 function editOutlineSeq(idx) {
   if (!bookData?.outline?.sequences?.[idx]) return;
   const s = bookData.outline.sequences[idx];
-  const summary = prompt('序列摘要：', s.summary || '');
-  if (summary === null) return;
-  const goal = prompt('叙事目标：', s.narrative_goal || '');
-  if (goal === null) return;
-  const hook = prompt('结尾钩子：', s.end_hook || '');
-  if (hook === null) return;
-  const scenes = prompt('预计章节数：', s.estimated_scenes || '');
-  if (scenes === null) return;
-  s.summary = summary;
-  s.narrative_goal = goal;
-  s.end_hook = hook;
-  s.estimated_scenes = parseInt(scenes) || s.estimated_scenes;
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.style.display = 'flex';
+  modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+  modal.innerHTML = `
+    <div class="modal" style="max-width:600px">
+      <h3>编辑序列 #${s.number||idx+1}</h3>
+      <div class="form-group">
+        <label class="form-label">序列摘要</label>
+        <textarea class="form-textarea" id="edit-seq-summary" rows="4" style="font-size:13px">${esc(s.summary||'')}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">叙事目标</label>
+        <textarea class="form-textarea" id="edit-seq-goal" rows="3" style="font-size:13px">${esc(s.narrative_goal||'')}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">结尾钩子</label>
+        <textarea class="form-textarea" id="edit-seq-hook" rows="2" style="font-size:13px">${esc(s.end_hook||'')}</textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">预计章节数</label>
+        <input class="form-input" id="edit-seq-scenes" type="number" value="${s.estimated_scenes||''}" style="font-size:13px;width:120px">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+        <button class="btn" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" onclick="saveOutlineSeqEdit(${idx})">保存修改</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+function saveOutlineSeqEdit(idx) {
+  if (!bookData?.outline?.sequences?.[idx]) return;
+  const s = bookData.outline.sequences[idx];
+  s.summary = document.getElementById('edit-seq-summary').value;
+  s.narrative_goal = document.getElementById('edit-seq-goal').value;
+  s.end_hook = document.getElementById('edit-seq-hook').value;
+  const scenes = document.getElementById('edit-seq-scenes').value;
+  if (scenes) s.estimated_scenes = parseInt(scenes);
+  const overlay = document.getElementById('edit-seq-summary')?.closest('.modal-overlay');
+  if (overlay) overlay.remove();
   saveOutline();
   loadStep4();
 }
@@ -2590,26 +2629,26 @@ function renderStep4ChOutlines() {
             <label>写作基调</label>
             <input id="co-notes-${i}" value="${esc(co.writing_notes||'')}" placeholder="本章写作风格或基调指导（可选）">
           </div>
-          ${beats.length ? `
           <div class="co-field">
-            <label>节拍 (${beats.length})</label>
-            <ul class="co-beats-list">
-              ${beats.map((b, bi) => `
-                <li style="flex-direction:column;gap:2px">
-                  <div style="display:flex;gap:8px;align-items:center">
-                    <span class="beat-desc">${esc(b.description || b)}</span>
-                    ${b.dramatic_function ? `<span class="beat-func">${esc(b.dramatic_function)}</span>` : ''}
+            <label>节拍${beats.length ? ` (${beats.length})` : ''}</label>
+            <div class="co-beats-list">
+              ${beats.length ? beats.map((b, bi) => `
+                <div style="border:1px solid var(--border);border-radius:4px;padding:8px;margin-bottom:6px;background:var(--bg)">
+                  <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+                    <input id="co-beat-desc-${i}-${bi}" value="${esc(typeof b === 'string' ? b : b.description||'')}" placeholder="节拍描述" style="flex:1;padding:4px 6px;font-size:12px;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text)">
+                    <input id="co-beat-func-${i}-${bi}" value="${esc(typeof b === 'string' ? '' : b.dramatic_function||'')}" placeholder="功能" style="width:80px;padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text)">
+                    <button class="btn btn-ghost btn-sm" onclick="deleteBeat(${i},${bi})" title="删除节拍" style="font-size:11px;padding:2px 6px">&#128465;</button>
                   </div>
-                  ${b.detail ? `<div style="font-size:11px;color:var(--text2);padding-left:2px;line-height:1.6">${esc(b.detail)}</div>` : ''}
-                </li>
-              `).join('')}
-            </ul>
-          </div>` : ''}
-          ${co.mandatory_tasks?.length ? `
+                  <textarea id="co-beat-detail-${i}-${bi}" rows="2" placeholder="节拍详情（可选）" style="width:100%;padding:4px 6px;font-size:11px;border:1px solid var(--border);border-radius:3px;background:var(--bg2);color:var(--text);resize:vertical">${esc(typeof b === 'string' ? '' : b.detail||'')}</textarea>
+                </div>
+              `).join('') : '<div style="font-size:12px;color:var(--text3);padding:4px 0;margin-bottom:4px">暂无节拍</div>'}
+            </div>
+            <button class="btn btn-sm" onclick="addBeat(${i})" style="margin-top:4px;font-size:11px">+ 添加节拍</button>
+          </div>
           <div class="co-field">
-            <label>必须完成的任务</label>
-            <div style="font-size:12px;color:var(--text2)">${co.mandatory_tasks.map(t => esc(t)).join('、')}</div>
-          </div>` : ''}
+            <label>必须完成的任务（每行一个）</label>
+            <textarea id="co-tasks-${i}" rows="3" placeholder="每行一个必须完成的叙事任务" style="width:100%;padding:6px 8px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);resize:vertical">${esc((co.mandatory_tasks||[]).join('\n'))}</textarea>
+          </div>
           ${co.weapon_tech_notes ? `
           <div class="co-field">
             <label>武器/技术备注</label>
@@ -2656,6 +2695,22 @@ async function saveChOutlineInline(idx) {
   if (weaponEl && co.weapon_tech_notes) {
     try { co.weapon_tech_notes = JSON.parse(weaponEl.value); } catch {}
   }
+  // 收集节拍
+  const newBeats = [];
+  let bi = 0;
+  while (document.getElementById(`co-beat-desc-${idx}-${bi}`)) {
+    const desc = document.getElementById(`co-beat-desc-${idx}-${bi}`).value.trim();
+    const func = document.getElementById(`co-beat-func-${idx}-${bi}`).value.trim();
+    const detail = document.getElementById(`co-beat-detail-${idx}-${bi}`).value.trim();
+    if (desc) {
+      newBeats.push({ description: desc, ...(func ? { dramatic_function: func } : {}), ...(detail ? { detail } : {}) });
+    }
+    bi++;
+  }
+  co.beats = newBeats;
+  // 收集必须完成的任务
+  const tasksText = document.getElementById('co-tasks-' + idx)?.value || '';
+  co.mandatory_tasks = tasksText.split('\n').map(s => s.trim()).filter(Boolean);
   try {
     await api(`/books/${currentBook.id}/chapter-outlines`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
@@ -2681,6 +2736,19 @@ async function aiGenChapterOutlines() {
     loadStep4();
   } catch (e) { toast('生成失败: ' + e.message, false); }
   finally { if (btn) { btn.disabled = false; btn.textContent = btn._origText || 'AI 生成章节大纲'; } }
+}
+
+function addBeat(idx) {
+  if (!chapterOutlinesCache?.[idx]) return;
+  if (!chapterOutlinesCache[idx].beats) chapterOutlinesCache[idx].beats = [];
+  chapterOutlinesCache[idx].beats.push({ description: '', dramatic_function: '', detail: '' });
+  loadStep4();
+}
+
+function deleteBeat(idx, bi) {
+  if (!chapterOutlinesCache?.[idx]?.beats) return;
+  chapterOutlinesCache[idx].beats.splice(bi, 1);
+  loadStep4();
 }
 
 function deleteChOutline(idx) {
@@ -3317,6 +3385,24 @@ function loadStep6() {
             <div class="mode-tab active" id="tab-audit" onclick="switchAuditTab('audit',this)">审计结果</div>
             <div class="mode-tab" id="tab-story" onclick="switchAuditTab('story',this)">故事数据</div>
             <div class="mode-tab" id="tab-edit" onclick="switchAuditTab('edit',this)">正文编辑</div>
+          </div>
+        </div>
+        <!-- 状态提取提醒 -->
+        <div class="card" id="extract-reminder" style="margin-bottom:12px;border:1px solid var(--yellow);background:var(--yellow-bg)">
+          <div style="display:flex;align-items:flex-start;gap:8px;padding:10px 12px">
+            <span style="font-size:16px;flex-shrink:0">&#128161;</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;font-weight:600;color:var(--yellow);margin-bottom:4px">写正文后别忘了提取故事数据！</div>
+              <div style="font-size:11px;color:var(--text2);line-height:1.5">
+                正文生成时只会自动保存摘要，<b>情感变化、角色关系、伏笔、位置、因果链</b>等信息需要手动提取才能更新到世界状态。
+                如果不提取，<b>下一章生成时看不到这些变化</b>，会丢失连续性。
+              </div>
+              <div style="display:flex;gap:6px;margin-top:8px">
+                <button class="btn btn-primary btn-sm" onclick="extractStoryState();document.getElementById('extract-reminder').style.display='none'" style="font-size:11px">&#128269; 提取当前章节</button>
+                <button class="btn btn-sm" onclick="extractAllStoryState();document.getElementById('extract-reminder').style.display='none'" style="font-size:11px">&#9889; 一键全部提取</button>
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('extract-reminder').style.display='none'" style="font-size:11px;margin-left:auto">&#10005; 关闭</button>
+              </div>
+            </div>
           </div>
         </div>
         <!-- 故事数据面板 -->
