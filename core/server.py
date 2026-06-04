@@ -270,6 +270,7 @@ class UpdateBookConfigReq(BaseModel):
 
 class AiGenerateOutlineReq(BaseModel):
     idea: str = ""  # 用户自定义想法（可选）
+    arc_id: str = ""  # 指定篇章 ID，筛选该篇分配的事件
 
 class AiContinueOutlineReq(BaseModel):
     extra_sequences: int = 2  # 要追加的序列数量
@@ -996,6 +997,631 @@ def save_chapter_outlines(book_id: str, req: SaveChapterOutlinesReq):
     path = sm.state_dir / "chapter_outlines.json"
     path.write_text(json.dumps(req.outlines, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True, "message": f"已保存 {len(req.outlines)} 章章纲"}
+
+
+# ── 篇幅总规划（多篇章/Arc 管理） ────────────────────────────────────────────
+
+class ArcInfo(BaseModel):
+    id: str
+    title: str
+    order: int
+    planned_chapters: int | None = None
+    assigned_event_ids: list[str] = []
+
+class NovelPlan(BaseModel):
+    overall_goal: str = ""
+    current_arc_id: str = "arc_001"
+    arcs: list[ArcInfo] = [ArcInfo(id="arc_001", title="第一篇", order=1)]
+
+class SaveNovelPlanReq(BaseModel):
+    novel_plan: dict
+
+class SwitchArcReq(BaseModel):
+    arc_id: str
+
+class UpdateArcReq(BaseModel):
+    id: str
+    title: str | None = None
+    order: int | None = None
+    planned_chapters: int | None = None
+    assigned_event_ids: list[str] | None = None
+
+
+def _arc_outline_path(sm, arc_id: str) -> Path:
+    return sm.state_dir / f"{arc_id}_outline.json"
+
+
+def _novel_plan_path(sm) -> Path:
+    return sm.state_dir / "novel_plan.json"
+
+
+def _ensure_novel_plan(sm) -> dict:
+    """确保 novel_plan.json 存在，不存在则从现有数据自动创建"""
+    np_path = _novel_plan_path(sm)
+    if np_path.exists():
+        return json.loads(np_path.read_text(encoding="utf-8"))
+
+    outline_path = sm.state_dir / "outline.json"
+    if outline_path.exists():
+        existing_outline = json.loads(outline_path.read_text(encoding="utf-8"))
+        title = existing_outline.get("title", "")
+        goal = existing_outline.get("logline", "")
+    else:
+        title = ""
+        goal = ""
+
+    novel_plan = {
+        "overall_goal": goal,
+        "current_arc_id": "arc_001",
+        "arcs": [
+            {"id": "arc_001", "title": title or "第一篇", "order": 1, "planned_chapters": None, "assigned_event_ids": []}
+        ],
+    }
+    np_path.write_text(json.dumps(novel_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+    _save_current_outline_to_arc(sm, "arc_001")
+    return novel_plan
+
+
+def _read_json_file(path: Path) -> str:
+    """读取 JSON 文件，自动处理编码问题"""
+    raw = path.read_bytes()
+    for enc in ("utf-8", "gbk", "gb2312", "utf-8-sig"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return raw.decode("utf-8", errors="replace")
+
+
+def _save_current_outline_to_arc(sm, arc_id: str) -> None:
+    """将当前 outline.json 保存到对应 Arc 的存储文件"""
+    outline_path = sm.state_dir / "outline.json"
+    if not outline_path.exists():
+        return
+    arc_path = _arc_outline_path(sm, arc_id)
+    arc_path.write_text(_read_json_file(outline_path), encoding="utf-8")
+
+
+def _load_arc_outline_to_current(sm, arc_id: str) -> None:
+    """将指定 Arc 的 outline 加载到 outline.json"""
+    arc_path = _arc_outline_path(sm, arc_id)
+    outline_path = sm.state_dir / "outline.json"
+    if arc_path.exists():
+        content = _read_json_file(arc_path)
+        json.loads(content)
+        outline_path.write_text(content, encoding="utf-8")
+    else:
+        cfg = sm.read_config()
+        new_outline = {
+            "id": f"outline_{arc_id}",
+            "title": cfg.get("title", ""),
+            "logline": "",
+            "genre": cfg.get("genre", "玄幻"),
+            "sequences": [],
+            "emotional_roadmap": "",
+        }
+        outline_path.write_text(json.dumps(new_outline, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@app.get("/api/books/{book_id}/novel-plan")
+def get_novel_plan(book_id: str):
+    sm = _sm(book_id)
+    novel_plan = _ensure_novel_plan(sm)
+    return novel_plan
+
+
+@app.put("/api/books/{book_id}/novel-plan")
+def save_novel_plan(book_id: str, req: SaveNovelPlanReq):
+    sm = _sm(book_id)
+    np_path = _novel_plan_path(sm)
+    np_path.write_text(json.dumps(req.novel_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "message": "篇幅规划已保存"}
+
+
+@app.post("/api/books/{book_id}/switch-arc")
+def switch_arc(book_id: str, req: SwitchArcReq):
+    sm = _sm(book_id)
+    novel_plan = _ensure_novel_plan(sm)
+
+    old_arc_id = novel_plan.get("current_arc_id", "arc_001")
+    if old_arc_id == req.arc_id:
+        return {"ok": True, "message": "已是当前篇章", "arc_id": req.arc_id}
+
+    _save_current_outline_to_arc(sm, old_arc_id)
+    _load_arc_outline_to_current(sm, req.arc_id)
+
+    novel_plan["current_arc_id"] = req.arc_id
+    np_path = _novel_plan_path(sm)
+    np_path.write_text(json.dumps(novel_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {"ok": True, "message": f"已切换到 {req.arc_id}", "arc_id": req.arc_id}
+
+
+@app.post("/api/books/{book_id}/add-arc")
+def add_arc(book_id: str, arc: ArcInfo):
+    sm = _sm(book_id)
+    novel_plan = _ensure_novel_plan(sm)
+
+    if any(a["id"] == arc.id for a in novel_plan["arcs"]):
+        raise HTTPException(400, f"篇章 ID {arc.id} 已存在")
+
+    old_arc_id = novel_plan.get("current_arc_id", "arc_001")
+    _save_current_outline_to_arc(sm, old_arc_id)
+
+    novel_plan["arcs"].append({
+        "id": arc.id,
+        "title": arc.title,
+        "order": arc.order,
+        "planned_chapters": arc.planned_chapters,
+        "assigned_event_ids": arc.assigned_event_ids,
+    })
+
+    _load_arc_outline_to_current(sm, arc.id)
+
+    np_path = _novel_plan_path(sm)
+    np_path.write_text(json.dumps(novel_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {"ok": True, "arc_id": arc.id, "message": f"篇章「{arc.title}」已创建"}
+
+
+@app.get("/api/books/{book_id}/novel-plan/events")
+def list_novel_plan_events(book_id: str):
+    """列出所有可用事件（优先从 setup_state.json，其次从 events.json），供分配用"""
+    sm = _sm(book_id)
+    events = []
+
+    setup_path = sm.state_dir / "setup_state.json"
+    if setup_path.exists():
+        try:
+            setup = json.loads(setup_path.read_text(encoding="utf-8"))
+            raw = setup.get("events", {})
+            if isinstance(raw, list):
+                for evt in raw:
+                    if isinstance(evt, dict):
+                        events.append({
+                            "id": evt.get("id", ""),
+                            "name": evt.get("name", evt.get("id", "")),
+                            "description": evt.get("description", ""),
+                            "suggested_act": evt.get("suggested_act", 1),
+                            "suggested_function": evt.get("suggested_function", ""),
+                        })
+            elif isinstance(raw, dict):
+                for eid, evt in raw.items():
+                    if isinstance(evt, dict):
+                        events.append({
+                            "id": eid,
+                            "name": evt.get("name", eid),
+                            "description": evt.get("description", ""),
+                            "suggested_act": evt.get("suggested_act", 1),
+                            "suggested_function": evt.get("suggested_function", ""),
+                        })
+        except Exception:
+            pass
+
+    if not events:
+        events_path = sm.book_dir / "setup" / "events.json"
+        if events_path.exists():
+            try:
+                data = json.loads(events_path.read_text(encoding="utf-8"))
+                raw = data.get("events", []) if isinstance(data, dict) else data
+                if isinstance(raw, list):
+                    for evt in raw:
+                        if isinstance(evt, dict):
+                            events.append({
+                                "id": evt.get("id", ""),
+                                "name": evt.get("name", evt.get("id", "")),
+                                "description": evt.get("description", ""),
+                                "suggested_act": evt.get("suggested_act", 1),
+                                "suggested_function": evt.get("suggested_function", ""),
+                            })
+            except Exception:
+                pass
+
+    events.sort(key=lambda e: e.get("suggested_act", 1))
+    return {"events": events}
+
+
+@app.put("/api/books/{book_id}/novel-plan/arc/{arc_id}")
+def update_arc(book_id: str, arc_id: str, req: UpdateArcReq):
+    """更新篇章信息（标题、排序、事件分配等）"""
+    sm = _sm(book_id)
+    np_path = _novel_plan_path(sm)
+    if not np_path.exists():
+        raise HTTPException(404, "篇幅规划不存在，请先生成")
+    novel_plan = json.loads(np_path.read_text(encoding="utf-8"))
+    target = None
+    for a in novel_plan["arcs"]:
+        if a["id"] == arc_id:
+            target = a
+            break
+    if not target:
+        raise HTTPException(404, f"篇章 {arc_id} 不存在")
+    if req.title is not None:
+        target["title"] = req.title
+    if req.order is not None:
+        target["order"] = req.order
+    if req.planned_chapters is not None:
+        target["planned_chapters"] = req.planned_chapters
+    if req.assigned_event_ids is not None:
+        target["assigned_event_ids"] = req.assigned_event_ids
+    np_path.write_text(json.dumps(novel_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "message": f"篇章「{target['title']}」已更新"}
+
+
+@app.delete("/api/books/{book_id}/novel-plan/arc/{arc_id}")
+def delete_arc(book_id: str, arc_id: str):
+    """删除篇章"""
+    sm = _sm(book_id)
+    np_path = _novel_plan_path(sm)
+    if not np_path.exists():
+        raise HTTPException(404, "篇幅规划不存在")
+    novel_plan = json.loads(np_path.read_text(encoding="utf-8"))
+    arcs = novel_plan["arcs"]
+    if len(arcs) <= 1:
+        raise HTTPException(400, "至少保留一个篇章")
+    target_idx = None
+    for i, a in enumerate(arcs):
+        if a["id"] == arc_id:
+            target_idx = i
+            break
+    if target_idx is None:
+        raise HTTPException(404, f"篇章 {arc_id} 不存在")
+    if novel_plan.get("current_arc_id") == arc_id:
+        new_current = arcs[0]["id"] if target_idx != 0 else arcs[1]["id"]
+        novel_plan["current_arc_id"] = new_current
+    arcs.pop(target_idx)
+    # 删除对应 outline 文件
+    arc_outline = _arc_outline_path(sm, arc_id)
+    if arc_outline.exists():
+        arc_outline.unlink()
+    np_path.write_text(json.dumps(novel_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "message": "篇章已删除"}
+
+
+class AddEventReq(BaseModel):
+    name: str
+    description: str = ""
+    suggested_act: int = 1
+    suggested_function: str = "setup"
+
+
+@app.post("/api/books/{book_id}/novel-plan/events")
+def add_novel_plan_event(book_id: str, req: AddEventReq):
+    """手动添加事件到 setup_state.json 和 events.json"""
+    sm = _sm(book_id)
+    evt_id = f"evt_{uuid.uuid4().hex[:8]}"
+    new_event = {
+        "id": evt_id,
+        "name": req.name,
+        "description": req.description,
+        "suggested_act": req.suggested_act,
+        "suggested_function": req.suggested_function,
+        "characters_involved": [],
+        "dramatic_question": "",
+    }
+
+    updated_setup = False
+    updated_events = False
+
+    setup_path = sm.state_dir / "setup_state.json"
+    if setup_path.exists():
+        try:
+            setup = json.loads(_read_json_file(setup_path))
+            raw = setup.get("events", {})
+            if isinstance(raw, dict):
+                raw[evt_id] = {
+                    "id": evt_id,
+                    "name": req.name,
+                    "description": req.description,
+                    "suggested_act": req.suggested_act,
+                    "suggested_function": req.suggested_function,
+                    "characters_involved": [],
+                    "dramatic_question": "",
+                }
+                setup["events"] = raw
+                setup_path.write_text(json.dumps(setup, ensure_ascii=False, indent=2), encoding="utf-8")
+                updated_setup = True
+            elif isinstance(raw, list):
+                raw.append(new_event)
+                setup["events"] = raw
+                setup_path.write_text(json.dumps(setup, ensure_ascii=False, indent=2), encoding="utf-8")
+                updated_setup = True
+        except Exception:
+            pass
+
+    events_path = sm.book_dir / "setup" / "events.json"
+    if events_path.exists():
+        try:
+            data = json.loads(_read_json_file(events_path))
+            if isinstance(data, dict):
+                evts = data.get("events", [])
+            else:
+                evts = data
+            if isinstance(evts, list):
+                evts.append(new_event)
+                if isinstance(data, dict):
+                    data["events"] = evts
+                    events_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                else:
+                    events_path.write_text(json.dumps(evts, ensure_ascii=False, indent=2), encoding="utf-8")
+                updated_events = True
+        except Exception:
+            pass
+
+    if not updated_setup and not updated_events:
+        setup_state = {"seed_event_id": evt_id, "characters": {}, "locations": {}, "factions": {}, "world_rules": [], "events": {evt_id: new_event}}
+        sm.state_dir.mkdir(parents=True, exist_ok=True)
+        setup_path.write_text(json.dumps(setup_state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {"ok": True, "event": new_event}
+
+
+@app.delete("/api/books/{book_id}/novel-plan/events/{event_id}")
+def delete_novel_plan_event(book_id: str, event_id: str):
+    """删除指定事件"""
+    sm = _sm(book_id)
+    removed = False
+
+    setup_path = sm.state_dir / "setup_state.json"
+    if setup_path.exists():
+        try:
+            setup = json.loads(_read_json_file(setup_path))
+            raw = setup.get("events", {})
+            if isinstance(raw, dict) and event_id in raw:
+                del raw[event_id]
+                setup["events"] = raw
+                setup_path.write_text(json.dumps(setup, ensure_ascii=False, indent=2), encoding="utf-8")
+                removed = True
+            elif isinstance(raw, list):
+                before = len(raw)
+                setup["events"] = [e for e in raw if e.get("id") != event_id]
+                if len(setup["events"]) < before:
+                    setup_path.write_text(json.dumps(setup, ensure_ascii=False, indent=2), encoding="utf-8")
+                    removed = True
+        except Exception:
+            pass
+
+    events_path = sm.book_dir / "setup" / "events.json"
+    if events_path.exists():
+        try:
+            data = json.loads(_read_json_file(events_path))
+            if isinstance(data, dict):
+                evts = data.get("events", [])
+                before = len(evts)
+                data["events"] = [e for e in evts if e.get("id") != event_id]
+                if len(data["events"]) < before:
+                    events_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    removed = True
+            elif isinstance(data, list):
+                before = len(data)
+                new_data = [e for e in data if e.get("id") != event_id]
+                if len(new_data) < before:
+                    events_path.write_text(json.dumps(new_data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    removed = True
+        except Exception:
+            pass
+
+    np_path = _novel_plan_path(sm)
+    if np_path.exists():
+        try:
+            novel_plan = json.loads(np_path.read_text(encoding="utf-8"))
+            for arc in novel_plan.get("arcs", []):
+                aids = arc.get("assigned_event_ids", [])
+                if event_id in aids:
+                    arc["assigned_event_ids"] = [e for e in aids if e != event_id]
+            np_path.write_text(json.dumps(novel_plan, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    if not removed:
+        raise HTTPException(404, f"事件 {event_id} 不存在")
+    return {"ok": True, "message": "事件已删除"}
+
+
+class AiGenEventsReq(BaseModel):
+    arc_title: str
+    arc_description: str
+    act_start: int = 1
+    event_count: int = 8
+
+
+@app.post("/api/books/{book_id}/ai-generate/arc-events")
+async def ai_generate_arc_events(book_id: str, req: AiGenEventsReq):
+    """AI 根据已有内容和篇章描述，生成新篇章的事件"""
+    _load_env()
+    from core.llm import LLMMessage
+    try:
+        llm = _create_llm(temperature=0.8)
+    except Exception as e:
+        raise HTTPException(400, f"LLM 创建失败：{e}")
+
+    sm = _sm(book_id)
+    cfg = sm.read_config()
+
+    existing_events_summary = ""
+    setup_path = sm.state_dir / "setup_state.json"
+    if setup_path.exists():
+        try:
+            setup = json.loads(_read_json_file(setup_path))
+            raw = setup.get("events", {})
+            evts = []
+            if isinstance(raw, list):
+                evts = raw
+            elif isinstance(raw, dict):
+                evts = list(raw.values())
+            if evts:
+                existing_events_summary = "\n".join(
+                    f"- [{e.get('suggested_act', '?')}幕] {e.get('name', e.get('id', ''))}: {e.get('description', '')}"
+                    for e in evts[:30]
+                )
+        except Exception:
+            pass
+
+    previous_arc_summary = ""
+    np_path = _novel_plan_path(sm)
+    if np_path.exists():
+        try:
+            novel_plan = json.loads(np_path.read_text(encoding="utf-8"))
+            overall_goal = novel_plan.get("overall_goal", "")
+            arcs = novel_plan.get("arcs", [])
+            current_arc_id = novel_plan.get("current_arc_id", "")
+            current_arc = next((a for a in arcs if a["id"] == current_arc_id), None)
+            if current_arc:
+                previous_arc_summary = f"当前篇章：{current_arc.get('title', '')}\n"
+                assigned_ids = current_arc.get("assigned_event_ids", [])
+                if assigned_ids:
+                    previous_arc_summary += f"已分配事件数：{len(assigned_ids)}\n"
+            if overall_goal:
+                previous_arc_summary += f"全书总目标：{overall_goal}\n"
+        except Exception:
+            pass
+
+    outline_summary = ""
+    outline_path = sm.state_dir / "outline.json"
+    if outline_path.exists():
+        try:
+            outline = json.loads(_read_json_file(outline_path))
+            acts = outline.get("acts", [])
+            if acts:
+                for act in acts[:3]:
+                    seqs = act.get("sequences", [])
+                    for seq in seqs[:4]:
+                        outline_summary += f"- 第{act.get('number', '?')}幕 序列{seq.get('number', '?')}：{seq.get('summary', '')}\n"
+        except Exception:
+            pass
+
+    prompt = f"""你是一位专业的网文策划编辑。现在需要为一个新篇章生成事件列表。
+
+## 小说信息
+- 书名：{cfg.get('title', '')}
+- 题材：{cfg.get('genre', '')}
+
+## 已有事件（前文已发生的事）
+{existing_events_summary or '暂无'}
+
+## 已有大纲概要
+{outline_summary or '暂无'}
+
+## 篇幅规划
+{previous_arc_summary or '暂无'}
+
+## 新篇章要求
+- 篇章名称：{req.arc_title}
+- 篇章方向：{req.arc_description}
+- 起始幕数：第{req.act_start}幕（新篇章从这一幕开始编号）
+- 需要生成约 {req.event_count} 个事件
+
+请根据已有内容和篇章方向，生成该篇章的事件列表。要求：
+1. 事件之间有因果递进关系
+2. 与前文已有事件自然衔接
+3. 包含铺垫、冲突、高潮、转折等不同功能的事件
+4. 每个事件用一句话描述核心冲突或变化
+
+请严格按以下 JSON 格式输出（直接输出 JSON，不要任何说明）：
+```json
+{{
+  "events": [
+    {{
+      "name": "事件名称（简短有力）",
+      "description": "事件描述（1-2句话，说明发生了什么、核心冲突是什么）",
+      "suggested_act": {req.act_start},
+      "suggested_function": "setup|conflict|climax|twist|resolution"
+    }}
+  ]
+}}
+```"""
+
+    try:
+        resp = await asyncio.to_thread(lambda: llm.complete([
+            LLMMessage(role="system", content="你是专业的网文策划编辑，擅长设计引人入胜的故事事件。只输出 JSON。"),
+            LLMMessage(role="user", content=prompt),
+        ]))
+        text = resp.content if hasattr(resp, 'content') else str(resp)
+    except Exception as e:
+        raise HTTPException(500, f"AI 调用失败：{e}")
+
+    text = text.strip()
+    import logging
+    logging.warning(f"[arc-events] LLM raw response (first 500 chars): {text[:500]}")
+
+    json_str = text
+    if "```" in json_str:
+        m = re.search(r'```(?:json)?\s*\n?(.*?)\n?\s*```', json_str, re.DOTALL)
+        if m:
+            json_str = m.group(1).strip()
+        else:
+            json_str = re.sub(r'^```\w*\n?', '', json_str)
+            json_str = re.sub(r'\n?```$', '', json_str)
+            json_str = json_str.strip()
+
+    if not json_str.startswith("{") and not json_str.startswith("["):
+        m = re.search(r'[\[{]', json_str)
+        if m:
+            json_str = json_str[m.start():]
+
+    try:
+        result = json.loads(json_str)
+    except json.JSONDecodeError:
+        try:
+            from core.llm import _repair_truncated_json
+            result = json.loads(_repair_truncated_json(json_str))
+        except Exception:
+            logging.error(f"[arc-events] Failed to parse JSON: {json_str[:300]}")
+            raise HTTPException(500, f"AI 返回的 JSON 格式错误，请重试。原始返回前200字：{text[:200]}")
+
+    generated = result.get("events", []) if isinstance(result, dict) else []
+    if not generated and isinstance(result, list):
+        generated = result
+
+    added = []
+    for evt in generated:
+        evt_id = f"evt_{uuid.uuid4().hex[:8]}"
+        new_event = {
+            "id": evt_id,
+            "name": evt.get("name", "未命名事件"),
+            "description": evt.get("description", ""),
+            "suggested_act": evt.get("suggested_act", req.act_start),
+            "suggested_function": evt.get("suggested_function", "setup"),
+            "characters_involved": [],
+            "dramatic_question": "",
+        }
+
+        if setup_path.exists():
+            try:
+                setup = json.loads(_read_json_file(setup_path))
+                raw = setup.get("events", {})
+                if isinstance(raw, dict):
+                    raw[evt_id] = new_event
+                    setup["events"] = raw
+                    setup_path.write_text(json.dumps(setup, ensure_ascii=False, indent=2), encoding="utf-8")
+                elif isinstance(raw, list):
+                    raw.append(new_event)
+                    setup["events"] = raw
+                    setup_path.write_text(json.dumps(setup, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+        events_path = sm.book_dir / "setup" / "events.json"
+        if events_path.exists():
+            try:
+                data = json.loads(_read_json_file(events_path))
+                if isinstance(data, dict):
+                    evts = data.get("events", [])
+                else:
+                    evts = data
+                if isinstance(evts, list):
+                    evts.append(new_event)
+                    if isinstance(data, dict):
+                        data["events"] = evts
+                        events_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                    else:
+                        events_path.write_text(json.dumps(evts, ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+        added.append(new_event)
+
+    return {"ok": True, "events": added, "count": len(added)}
 
 
 # ── 导入大纲（外部大模型提取后导入） ──────────────────────────────────────────
@@ -2313,9 +2939,29 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
         f"- {c.name}（{c.id}）：外部目标={c.need.external}，弧线={c.arc}"
         for c in state.characters.values()
     )
+
+    # 如果指定了 arc_id，只筛选该篇分配的事件
+    filtered_events = state.seed_events[:]
+    arc_title = state.config.title
+    if req.arc_id:
+        sm_local = _sm(book_id)
+        np_path = _novel_plan_path(sm_local)
+        if np_path.exists():
+            try:
+                np_data = json.loads(np_path.read_text(encoding="utf-8"))
+                for a in np_data.get("arcs", []):
+                    if a["id"] == req.arc_id:
+                        assigned_ids = set(a.get("assigned_event_ids", []))
+                        if assigned_ids:
+                            filtered_events = [e for e in state.seed_events if e.id in assigned_ids]
+                        arc_title = a.get("title", arc_title)
+                        break
+            except Exception:
+                pass
+
     event_summary = "\n".join(
         f"- {e.name}（第{e.suggested_act}幕，{e.suggested_function.value if e.suggested_function else '未知'}）：{e.description}"
-        for e in state.seed_events
+        for e in filtered_events
     )
 
     prompt = f"""\
@@ -2323,6 +2969,7 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
 
 ## 小说信息
 - 书名：{state.config.title}
+- 篇章：{arc_title}
 - 题材：{state.config.genre}
 - 总章数：{state.config.target_chapters}
 - 用户想法：{req.idea or '（按种子事件自然发展）'}
@@ -2330,8 +2977,8 @@ async def ai_generate_outline(book_id: str, req: AiGenerateOutlineReq):
 ## 角色
 {char_summary}
 
-## 种子事件
-{event_summary}
+## 该篇章的种子事件
+{event_summary or "（无指定事件，AI 自行发挥）"}
 
 ## 主角
 - 姓名：{pname}

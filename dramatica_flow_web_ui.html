@@ -13,6 +13,8 @@
   --red: #f85149; --red-bg: #2d0f0f;
   --yellow: #d29922; --yellow-bg: #2d2006;
   --blue: #58a6ff; --blue-bg: #0c2d6b;
+  --primary: #58a6ff; --primary-light: rgba(88,166,255,0.12);
+  --accent: #bc8cff;
   --purple: #bc8cff; --purple-bg: #2d1f54;
   --orange: #f0883e; --orange-bg: #2d1a06;
   --radius: 8px;
@@ -384,6 +386,7 @@ let currentStep = 2, maxUnlockedStep = 2;
 let apiConfigured = false, apiProvider = 'deepseek';
 let setupCache = {};
 let chapterOutlinesCache = null;
+let novelPlan = null;
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────
 
@@ -482,6 +485,7 @@ function updateBookSelector() {
 function selectBook(id) {
   if (!id) { currentBook = null; bookData = null; return; }
   currentBook = allBooks.find(b => b.id === id);
+  _arcPlanSelectedArc = null;
   if (currentBook) {
     const s = currentBook.stage || 1;
     if (s >= 2) unlockStep(3);
@@ -606,11 +610,13 @@ async function loadBookData() {
       api(`/books/${currentBook.id}/causal-chain`), api(`/books/${currentBook.id}/emotional-arcs`),
       api(`/books/${currentBook.id}/hooks`), api(`/books/${currentBook.id}/relationships`),
     ]);
-    let outline = null, chOutlines = null;
+    let outline = null, chOutlines = null, np = null;
     try { outline = await api(`/books/${currentBook.id}/outline`); } catch {}
     try { chOutlines = await api(`/books/${currentBook.id}/chapter-outlines`); } catch {}
+    try { np = await api(`/books/${currentBook.id}/novel-plan`); } catch {}
     chapterOutlinesCache = chOutlines;
-    bookData = { book, chapters, causal, emotions, hooks, relations, outline, chapterOutlines: chOutlines };
+    novelPlan = np;
+    bookData = { book, chapters, causal, emotions, hooks, relations, outline, chapterOutlines: chOutlines, novelPlan: np };
   } catch (e) { toast('加载数据失败: ' + e.message, false); }
 }
 
@@ -1905,20 +1911,437 @@ function loadStep4() {
   if (!bookData) { document.getElementById('step4-panel').innerHTML = '<div class="loading">加载数据中...</div>'; return; }
   const hasOutline = !!bookData.outline;
   const hasChOutlines = !!chapterOutlinesCache;
+  const np = novelPlan;
+  const currentArcId = np?.current_arc_id || 'arc_001';
+  const arcs = np?.arcs || [{id:'arc_001',title:'第一篇',order:1}];
+  const overallGoal = np?.overall_goal || '';
+  const currentArc = arcs.find(a => a.id === currentArcId) || arcs[0];
+
+  const arcTabs = arcs.map(a => {
+    const active = a.id === currentArcId;
+    const statusIcon = active ? '&#128221;' : '';
+    const chInfo = a.planned_chapters ? `${a.planned_chapters}章` : '';
+    return `<div class="tab-item ${active?'active':''}" onclick="switchArc('${a.id}')" style="font-size:11px;padding:4px 10px" title="${a.title}${chInfo?' · 计划'+chInfo:''}">${statusIcon} ${esc(a.title)} ${chInfo?`<span style="font-size:10px;color:var(--text3)">${chInfo}</span>`:''}</div>`;
+  }).join('');
 
   document.getElementById('step4-panel').innerHTML = `
     <div style="max-width:900px;margin:0 auto">
       <div class="card">
         <div class="card-header">&#128214; 大纲规划 <span style="margin-left:auto;font-size:12px;font-weight:400"><button class="btn btn-ghost btn-sm" onclick="editBookSettings('${currentBook.id}')">&#9881; 书籍设置</button></span></div>
         <div class="form-desc">创作流程：<b>1) 生成故事大纲</b> → <b>2) 审阅并编辑</b> → <b>3) 生成章节大纲</b> → <b>4) 可修改每章大纲、手动添加事件</b>。大纲确定后才能开始写作。</div>
-        <div class="tab-bar">
+        <div class="card" style="padding:10px 14px;margin-bottom:0;background:var(--bg2);border:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-size:12px;font-weight:600;color:var(--text2);white-space:nowrap">&#127919; 当前篇章</span>
+            <div class="tab-bar" style="margin:0;flex:1;min-width:300px;justify-content:flex-start">
+              ${arcTabs}
+              <button class="btn btn-ghost btn-sm" onclick="addNewArc()" title="新增篇章" style="font-size:11px;padding:4px 8px">+ 新增篇</button>
+            </div>
+          </div>
+        </div>
+        <div class="tab-bar" style="margin-top:8px">
+          <div class="tab-item ${step4SubTab==='arcplan'?'active':''}" onclick="step4SubTab='arcplan';loadStep4()">&#127919; 篇幅规划</div>
           <div class="tab-item ${step4SubTab==='outline'?'active':''}" onclick="step4SubTab='outline';loadStep4()">&#128203; 故事大纲 ${hasOutline?'&#10003;':''}</div>
           <div class="tab-item ${step4SubTab==='chapters'?'active':''}" onclick="step4SubTab='chapters';loadStep4()">&#128221; 章节大纲 ${hasChOutlines?'&#10003;':''}</div>
           <div class="tab-item ${step4SubTab==='data'?'active':''}" onclick="step4SubTab='data';loadStep4()">&#128200; 写作数据</div>
         </div>
-        <div id="step4-content">${step4SubTab==='outline'?renderStep4Outline():step4SubTab==='chapters'?renderStep4ChOutlines():renderStep4Data()}</div>
+        <div id="step4-content">${step4SubTab==='arcplan'?renderStep4ArcPlan():step4SubTab==='outline'?renderStep4Outline():step4SubTab==='chapters'?renderStep4ChOutlines():renderStep4Data()}</div>
       </div>
     </div>`;
+}
+
+async function switchArc(arcId) {
+  if (!currentBook || !novelPlan) return;
+  if (novelPlan.current_arc_id === arcId) return;
+  toast('切换篇章中...', 'loading');
+  try {
+    const res = await api(`/books/${currentBook.id}/switch-arc`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ arc_id: arcId }),
+    });
+    if (!res.ok) { toast(res.error || '切换失败', false); return; }
+    _arcPlanSelectedArc = arcId;
+    await loadBookData();
+    loadStep4();
+    toast(res.message || '已切换篇章', true);
+  } catch (e) { toast('切换失败: ' + e.message, false); }
+}
+
+async function addNewArc() {
+  if (!currentBook || !novelPlan) return;
+  const arcs = novelPlan.arcs || [];
+  const nextOrder = arcs.length + 1;
+  const title = prompt('请输入新篇章名称：', `第${nextOrder}篇`);
+  if (!title) return;
+  const plannedChapters = prompt('计划章节数（可选，留空则不限）：', '');
+  const arcId = `arc_${String(nextOrder).padStart(3, '0')}`;
+  toast('创建新篇章...', 'loading');
+  try {
+    const res = await api(`/books/${currentBook.id}/add-arc`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        id: arcId, title: title, order: nextOrder,
+        planned_chapters: plannedChapters ? parseInt(plannedChapters) : null,
+      }),
+    });
+    if (!res.ok) { toast(res.error || '创建失败', false); return; }
+    await loadBookData();
+    loadStep4();
+    toast(res.message || '新篇章已创建', true);
+  } catch (e) { toast('创建失败: ' + e.message, false); }
+}
+
+// ── 篇章管理 ──────────────────────────────────────────────────────────
+
+let _arcPlanEvents = [];
+let _arcPlanSelectedArc = null;
+let _arcPlanEventsBookId = null;
+
+function renderStep4ArcPlan() {
+  const np = novelPlan;
+  if (!np) return '<div class="empty">请先加载书籍数据</div>';
+  if ((_arcPlanEvents.length === 0 || _arcPlanEventsBookId !== currentBook?.id) && currentBook) {
+    loadArcPlanEvents().then(() => {
+      const el = document.getElementById('step4-content');
+      if (el && step4SubTab === 'arcplan') el.innerHTML = renderStep4ArcPlan();
+    });
+    return '<div class="loading">加载事件数据...</div>';
+  }
+  const arcs = np.arcs || [];
+  const currentArcId = np.current_arc_id || 'arc_001';
+  if (!_arcPlanSelectedArc) _arcPlanSelectedArc = currentArcId;
+  const selArc = arcs.find(a => a.id === _arcPlanSelectedArc) || arcs[0];
+  const selAssignedIds = new Set(selArc?.assigned_event_ids || []);
+  const allEvents = _arcPlanEvents;
+
+  const arcListHtml = arcs.map(a => {
+    const isCurrent = a.id === currentArcId;
+    const isSel = a.id === _arcPlanSelectedArc;
+    const evtCount = (a.assigned_event_ids || []).length;
+    return `<div class="card" style="padding:10px 12px;margin-bottom:6px;cursor:pointer;border-left:3px solid ${isCurrent ? 'var(--primary)' : isSel ? 'var(--accent)' : 'var(--border)'};${isSel ? 'background:var(--bg2)' : ''}" onclick="selectArcPlanArc('${a.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div style="display:flex;align-items:center;gap:6px">
+          ${isCurrent ? '<span style="color:var(--primary);font-size:10px">&#9679;</span>' : ''}
+          <strong style="font-size:13px">${esc(a.title)}</strong>
+          <span style="font-size:10px;color:var(--text3)">${a.planned_chapters ? a.planned_chapters + '章' : ''}</span>
+          <span style="font-size:10px;color:var(--text3)">${evtCount}事件</span>
+        </div>
+        <div style="display:flex;gap:2px" onclick="event.stopPropagation()">
+          <button class="btn btn-ghost btn-sm" onclick="switchArc('${a.id}')" title="切换到该篇章" ${isCurrent?'disabled':''}>&#9654;</button>
+          <button class="btn btn-ghost btn-sm" onclick="editArcPlanName('${a.id}')" title="重命名">&#9998;</button>
+          <button class="btn btn-ghost btn-sm" onclick="deleteArcPlanConfirm('${a.id}')" title="删除" ${arcs.length<=1?'disabled':''}>&#128465;</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const actGroups = {};
+  allEvents.forEach(e => {
+    const act = e.suggested_act || 1;
+    (actGroups[act] = actGroups[act] || []).push(e);
+  });
+  const actLabels = {1: '第一幕 · 铺垫', 2: '第二幕 · 冲突', 3: '第三幕 · 解决'};
+  const eventCheckHtml = Object.keys(actGroups).sort().map(act => {
+    const evts = actGroups[act];
+    return `<div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:4px">${actLabels[act] || '第'+act+'幕'}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px">
+        ${evts.map(e => {
+          const checked = selAssignedIds.has(e.id);
+          return `<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:var(--radius);font-size:11px;cursor:pointer;background:${checked ? 'var(--primary-light,rgba(99,102,241,0.1))' : 'var(--bg2)'};border:1px solid ${checked ? 'var(--primary)' : 'var(--border)'}">
+            <input type="checkbox" ${checked?'checked':''} onchange="toggleArcEvent('${e.id}',this.checked)" style="margin:0">
+            ${esc(e.name)}
+            <span style="cursor:pointer;color:var(--text3);font-size:10px;margin-left:2px" onclick="event.stopPropagation();event.preventDefault();deleteArcPlanEvent('${e.id}','${esc(e.name)}')" title="删除事件">&#10005;</span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start">
+      <div>
+        <div class="section-label" style="margin-bottom:8px">全书总目标</div>
+        <div style="margin-bottom:16px">
+          <textarea class="form-textarea" id="arcplan-goal" rows="2" style="font-size:12px;resize:vertical" placeholder="一句话描述全书总目标...">${esc(np.overall_goal || '')}</textarea>
+          <button class="btn btn-sm" onclick="saveArcPlanGoal()" style="margin-top:4px">保存总目标</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="section-label" style="margin:0">篇章列表</div>
+          <button class="btn btn-sm btn-success" onclick="addNewArc()">+ 新增</button>
+        </div>
+        ${arcListHtml}
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="section-label" style="margin:0">「${esc(selArc?.title || '')}」事件分配</div>
+          <div style="display:flex;gap:4px;align-items:center">
+            <div style="font-size:11px;color:var(--text3)">已选 ${selAssignedIds.size} / ${allEvents.length} 个事件</div>
+            <button class="btn btn-sm" onclick="showAddEventForm()" title="手动添加事件">+ 手动添加</button>
+            <button class="btn btn-sm btn-success" onclick="showAiGenEventsForm()" title="AI 生成新篇章事件">&#9889; AI 生成</button>
+          </div>
+        </div>
+        <div id="arcplan-add-event-form" style="display:none;margin-bottom:12px;padding:12px;background:var(--surface);border:1px solid var(--primary);border-radius:var(--radius)">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--primary)">手动添加事件</div>
+          <div style="display:flex;gap:6px;margin-bottom:6px;align-items:end">
+            <div style="flex:2">
+              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">事件名称</label>
+              <input class="form-input" id="add-evt-name" placeholder="事件名称" style="font-size:12px;width:100%">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">第几幕</label>
+              <input class="form-input" id="add-evt-act" type="number" min="1" value="${selArc ? _getArcActStart(selArc, arcs) : 1}" style="font-size:12px;width:60px">
+            </div>
+            <div>
+              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">功能</label>
+              <select class="form-select" id="add-evt-func" style="font-size:12px;width:90px">
+                <option value="setup">铺垫</option>
+                <option value="conflict">冲突</option>
+                <option value="climax">高潮</option>
+                <option value="twist">转折</option>
+                <option value="resolution">解决</option>
+              </select>
+            </div>
+          </div>
+          <textarea class="form-textarea" id="add-evt-desc" rows="2" placeholder="事件描述（1-2句话）" style="font-size:12px;resize:vertical"></textarea>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn btn-sm btn-success" onclick="doAddEvent()">添加</button>
+            <button class="btn btn-sm" onclick="document.getElementById('arcplan-add-event-form').style.display='none'">取消</button>
+          </div>
+        </div>
+        <div id="arcplan-ai-gen-form" style="display:none;margin-bottom:12px;padding:12px;background:var(--surface);border:1px solid var(--green);border-radius:var(--radius)">
+          <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--green)">&#9889; AI 生成篇章事件</div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:8px">描述新篇章的方向，AI 将根据已有内容和世界观自动生成事件，生成后自动存入世界观</div>
+          <div style="margin-bottom:6px">
+            <input class="form-input" id="aigen-evt-title" value="${esc(selArc?.title || '')}" placeholder="篇章名称（如：东海篇）" style="font-size:12px;width:100%">
+          </div>
+          <div style="display:flex;gap:8px;margin-bottom:6px">
+            <div style="flex:1">
+              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">生成事件数</label>
+              <input class="form-input" id="aigen-evt-count" type="number" min="3" max="20" value="8" style="font-size:12px;width:100%">
+            </div>
+            <div style="flex:1">
+              <label style="font-size:10px;color:var(--text3);display:block;margin-bottom:2px">起始幕数（第几幕开始）</label>
+              <input class="form-input" id="aigen-evt-act" type="number" min="1" value="${selArc ? _getArcActStart(selArc, arcs) : 1}" style="font-size:12px;width:100%">
+            </div>
+          </div>
+          <textarea class="form-textarea" id="aigen-evt-desc" rows="3" placeholder="描述这个篇章的方向和核心冲突...&#10;例如：主角进入新地图，发现隐藏势力，遭遇强敌..." style="font-size:12px;resize:vertical"></textarea>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn btn-sm btn-success" id="aigen-evt-btn" onclick="doAiGenEvents()">&#9889; 生成</button>
+            <button class="btn btn-sm" onclick="document.getElementById('arcplan-ai-gen-form').style.display='none'">取消</button>
+          </div>
+        </div>
+        ${allEvents.length === 0 ? '<div class="empty" style="padding:20px">暂无事件，点击上方「AI 生成」或「手动添加」创建事件</div>' : eventCheckHtml}
+        ${selAssignedIds.size > 0 ? `<div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:var(--radius)">
+          <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:6px">已分配事件</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            ${allEvents.filter(e => selAssignedIds.has(e.id)).map(e => `<span style="display:inline-block;padding:2px 8px;font-size:10px;background:var(--primary-light,rgba(99,102,241,0.1));border:1px solid var(--primary);border-radius:var(--radius);color:var(--primary)">${esc(e.name)}</span>`).join('')}
+          </div>
+        </div>` : ''}
+        ${selArc ? `<div style="margin-top:12px;display:flex;gap:8px">
+          <div class="form-group" style="margin:0;flex:1">
+            <label class="form-label" style="font-size:11px">计划章数</label>
+            <input class="form-input" id="arcplan-chapters" type="number" min="1" value="${selArc.planned_chapters || ''}" placeholder="不限" style="font-size:12px;width:80px" onchange="saveArcPlanChapters()">
+          </div>
+        </div>` : ''}
+      </div>
+    </div>`;
+}
+
+function selectArcPlanArc(arcId) {
+  _arcPlanSelectedArc = arcId;
+  document.getElementById('step4-content').innerHTML = renderStep4ArcPlan();
+}
+
+async function toggleArcEvent(eventId, checked) {
+  if (!_arcPlanSelectedArc || !novelPlan) return;
+  const arc = novelPlan.arcs.find(a => a.id === _arcPlanSelectedArc);
+  if (!arc) return;
+  let ids = arc.assigned_event_ids || [];
+  if (checked) {
+    if (!ids.includes(eventId)) ids.push(eventId);
+  } else {
+    ids = ids.filter(id => id !== eventId);
+  }
+  arc.assigned_event_ids = ids;
+  try {
+    await api(`/books/${currentBook.id}/novel-plan/arc/${_arcPlanSelectedArc}`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ id: _arcPlanSelectedArc, assigned_event_ids: ids }),
+    });
+  } catch (e) {
+    toast('保存失败: ' + e.message, false);
+  }
+  document.getElementById('step4-content').innerHTML = renderStep4ArcPlan();
+}
+
+async function saveArcPlanGoal() {
+  if (!currentBook || !novelPlan) return;
+  const goal = document.getElementById('arcplan-goal')?.value || '';
+  novelPlan.overall_goal = goal;
+  try {
+    await api(`/books/${currentBook.id}/novel-plan`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ novel_plan: novelPlan }),
+    });
+    toast('总目标已保存', true);
+  } catch (e) { toast('保存失败: ' + e.message, false); }
+}
+
+async function editArcPlanName(arcId) {
+  if (!novelPlan) return;
+  const arc = novelPlan.arcs.find(a => a.id === arcId);
+  if (!arc) return;
+  const name = prompt('修改篇章名称：', arc.title);
+  if (!name || name === arc.title) return;
+  try {
+    await api(`/books/${currentBook.id}/novel-plan/arc/${arcId}`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ id: arcId, title: name }),
+    });
+    arc.title = name;
+    toast('名称已更新', true);
+    loadStep4();
+  } catch (e) { toast('更新失败: ' + e.message, false); }
+}
+
+async function deleteArcPlanConfirm(arcId) {
+  if (!confirm('确定要删除该篇章吗？该篇章的大纲将被删除。')) return;
+  try {
+    const res = await api(`/books/${currentBook.id}/novel-plan/arc/${arcId}`, { method: 'DELETE' });
+    if (!res.ok) { toast(res.error || '删除失败', false); return; }
+    toast(res.message || '已删除', true);
+    _arcPlanSelectedArc = null;
+    await loadBookData();
+    loadStep4();
+  } catch (e) { toast('删除失败: ' + e.message, false); }
+}
+
+async function saveArcPlanChapters() {
+  if (!_arcPlanSelectedArc || !novelPlan) return;
+  const val = document.getElementById('arcplan-chapters')?.value;
+  const ch = val ? parseInt(val) : null;
+  try {
+    await api(`/books/${currentBook.id}/novel-plan/arc/${_arcPlanSelectedArc}`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ id: _arcPlanSelectedArc, planned_chapters: ch }),
+    });
+    const arc = novelPlan.arcs.find(a => a.id === _arcPlanSelectedArc);
+    if (arc) arc.planned_chapters = ch;
+    toast('章数已更新', true);
+  } catch (e) { toast('保存失败: ' + e.message, false); }
+}
+
+async function loadArcPlanEvents() {
+  if (!currentBook) return;
+  try {
+    const res = await api(`/books/${currentBook.id}/novel-plan/events`);
+    _arcPlanEvents = res.events || [];
+    _arcPlanEventsBookId = currentBook.id;
+  } catch (e) { _arcPlanEvents = []; _arcPlanEventsBookId = null; }
+}
+
+function _getArcActStart(arc, arcs) {
+  const idx = arcs.findIndex(a => a.id === arc.id);
+  if (idx <= 0) return 1;
+  let actOffset = 0;
+  for (let i = 0; i < idx; i++) {
+    actOffset += 1;
+  }
+  return actOffset + 1;
+}
+
+function showAddEventForm() {
+  const aiForm = document.getElementById('arcplan-ai-gen-form');
+  const addForm = document.getElementById('arcplan-add-event-form');
+  if (aiForm) aiForm.style.display = 'none';
+  if (addForm) addForm.style.display = addForm.style.display === 'none' ? 'block' : 'none';
+}
+
+function showAiGenEventsForm() {
+  const addForm = document.getElementById('arcplan-add-event-form');
+  const aiForm = document.getElementById('arcplan-ai-gen-form');
+  if (addForm) addForm.style.display = 'none';
+  if (aiForm) aiForm.style.display = aiForm.style.display === 'none' ? 'block' : 'none';
+}
+
+async function doAddEvent() {
+  if (!currentBook) return;
+  const name = document.getElementById('add-evt-name')?.value?.trim();
+  if (!name) { toast('请填写事件名称', false); return; }
+  const desc = document.getElementById('add-evt-desc')?.value?.trim() || '';
+  const act = parseInt(document.getElementById('add-evt-act')?.value) || 1;
+  const func = document.getElementById('add-evt-func')?.value || 'setup';
+  try {
+    const res = await api(`/books/${currentBook.id}/novel-plan/events`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, description: desc, suggested_act: act, suggested_function: func }),
+    });
+    if (res.event) {
+      _arcPlanEvents.push(res.event);
+      toast(`事件「${name}」已添加`, true);
+      document.getElementById('arcplan-add-event-form').style.display = 'none';
+      document.getElementById('step4-content').innerHTML = renderStep4ArcPlan();
+    }
+  } catch (e) { toast('添加失败: ' + e.message, false); }
+}
+
+async function doAiGenEvents() {
+  if (!currentBook) return;
+  const title = document.getElementById('aigen-evt-title')?.value?.trim();
+  const desc = document.getElementById('aigen-evt-desc')?.value?.trim();
+  const count = parseInt(document.getElementById('aigen-evt-count')?.value) || 8;
+  const actStart = parseInt(document.getElementById('aigen-evt-act')?.value) || 1;
+  if (!title && !desc) { toast('请填写篇章名称或方向描述', false); return; }
+  const btn = document.getElementById('aigen-evt-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '生成中...'; }
+  toast('AI 正在生成事件，请稍候...', 'loading');
+  try {
+    const res = await api(`/books/${currentBook.id}/ai-generate/arc-events`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ arc_title: title || '', arc_description: desc || '', act_start: actStart, event_count: count }),
+    });
+    if (res.events && res.events.length > 0) {
+      _arcPlanEvents.push(...res.events);
+      toast(`已生成 ${res.events.length} 个事件`, true);
+      document.getElementById('arcplan-ai-gen-form').style.display = 'none';
+      document.getElementById('step4-content').innerHTML = renderStep4ArcPlan();
+    } else {
+      toast('AI 未生成任何事件，请调整描述后重试', false);
+    }
+  } catch (e) { toast('AI 生成失败: ' + e.message, false); }
+  finally { if (btn) { btn.disabled = false; btn.innerHTML = '&#9889; 生成'; } }
+}
+
+async function deleteArcPlanEvent(eventId, eventName) {
+  if (!currentBook) return;
+  if (!confirm(`确定删除事件「${eventName}」吗？删除后将从所有篇章中移除。`)) return;
+  try {
+    await api(`/books/${currentBook.id}/novel-plan/events/${eventId}`, { method: 'DELETE' });
+    _arcPlanEvents = _arcPlanEvents.filter(e => e.id !== eventId);
+    if (novelPlan) {
+      for (const arc of (novelPlan.arcs || [])) {
+        arc.assigned_event_ids = (arc.assigned_event_ids || []).filter(id => id !== eventId);
+      }
+    }
+    toast(`事件「${eventName}」已删除`, true);
+    document.getElementById('step4-content').innerHTML = renderStep4ArcPlan();
+  } catch (e) { toast('删除失败: ' + e.message, false); }
+}
+
+async function editOverallGoal() {
+  if (!currentBook || !novelPlan) return;
+  const current = novelPlan.overall_goal || '';
+  const goal = prompt('请输入全书总目标（一句话描述）：', current);
+  if (goal === null) return;
+  novelPlan.overall_goal = goal;
+  try {
+    await api(`/books/${currentBook.id}/novel-plan`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ novel_plan: novelPlan }),
+    });
+    toast('总目标已更新', true);
+    loadStep4();
+  } catch (e) { toast('保存失败: ' + e.message, false); }
 }
 
 function renderStep4Outline() {
@@ -1989,9 +2412,10 @@ async function aiGenOutline() {
   toast('AI 正在生成大纲，请稍候...', 'loading');
   try {
     const idea = document.getElementById('outline-idea')?.value || '';
+    const arcId = novelPlan?.current_arc_id || '';
     const res = await api(`/books/${currentBook.id}/ai-generate/outline`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ idea }),
+      body: JSON.stringify({ idea, arc_id: arcId }),
     });
     if (!res.ok) { toast(res.error || '生成失败', false); return; }
     // 自动保存
