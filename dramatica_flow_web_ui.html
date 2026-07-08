@@ -3457,7 +3457,7 @@ function loadStep6() {
           <div id="rewrite-result" style="margin-top:8px"></div>
         </div>
         <!-- 风格提取面板 -->
-        <div class="card" id="style-panel" style="display:none;flex-direction:column;max-height:calc(100vh - 200px)">
+        <div class="card" id="style-panel" style="display:none;flex-direction:column">
           <div class="card-header">&#127912; 风格提取</div>
           <div class="form-desc" style="font-size:11px;margin-bottom:8px">从章节或自定义文本中深度分析写作风格，生成 7 维度专业风格提示词</div>
           <!-- 输入方式切换 -->
@@ -3489,17 +3489,17 @@ function loadStep6() {
             </div>
           </div>
           <button class="btn btn-primary btn-sm" style="width:100%;font-size:11px;margin-bottom:8px" onclick="extractStyle()">&#10024; 深度分析风格</button>
-          <div id="style-extract-result" style="display:none;overflow-y:auto;flex:1">
+          <div id="style-extract-result" style="display:none;flex-shrink:0">
             <label class="form-label" style="font-size:11px">分析结果（可编辑）</label>
-            <textarea id="style-prompt-text" class="form-textarea" rows="20" style="font-size:11px;line-height:1.6"></textarea>
+            <textarea id="style-prompt-text" class="form-textarea" rows="12" style="font-size:11px;line-height:1.6"></textarea>
             <div style="display:flex;gap:6px;margin-top:6px">
               <input id="style-name" class="form-input" placeholder="风格名称" style="flex:1;font-size:12px">
               <button class="btn btn-success btn-sm" style="font-size:11px" onclick="saveStyleProfile()">&#128190; 保存</button>
             </div>
           </div>
-          <div style="margin-top:10px;flex-shrink:0">
-            <label class="form-label" style="font-size:11px">已保存的风格</label>
-            <div id="style-profiles-list" style="margin-top:4px"></div>
+          <div style="margin-top:10px;flex:1;min-height:0;display:flex;flex-direction:column">
+            <label class="form-label" style="font-size:11px;flex-shrink:0">已保存的风格</label>
+            <div id="style-profiles-list" style="margin-top:4px;overflow-y:auto;flex:1"></div>
           </div>
         </div>
       </div>
