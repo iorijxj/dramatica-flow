@@ -2897,7 +2897,8 @@ function loadStep5() {
               <button class="btn btn-primary" style="flex:1" onclick="doWrite(1)">写下一章</button>
               <button class="btn" style="flex:1" onclick="doWrite(3)">连续写 3 章</button>
             </div>
-            <textarea id="qw-style-override" class="form-input" rows="2" placeholder="本次写作风格（可选，留空不改）。修改后会更新书籍默认风格" style="margin-top:10px"></textarea>
+            <div id="style-picker-qw" style="margin-top:10px"></div>
+            <textarea id="qw-style-override" class="form-input" rows="2" placeholder="本次写作风格（可选，留空不改）。修改后会更新书籍默认风格" style="margin-top:8px"></textarea>
             <div id="write-log" style="margin-top:10px"></div>
           </div>
           <!-- 续写 & 导入 -->
@@ -2921,6 +2922,32 @@ function loadStep5() {
   // 恢复之前选中的章节（含细纲）
   if (writingChapterIdx !== null && cos.length > 0 && writingChapterIdx < cos.length) {
     selectWritingChapter(writingChapterIdx);
+  }
+  // 加载风格选择器
+  loadStylePickers();
+}
+
+async function loadStylePickers() {
+  if (!currentBook) return;
+  try {
+    const profiles = await api(`/books/${currentBook.id}/style-profiles`);
+    if (!Array.isArray(profiles) || !profiles.length) return;
+    const options = '<option value="">-- 选择已保存的风格 --</option>' +
+      profiles.map(p => `<option value="${esc(p.style_prompt)}">${esc(p.name)}</option>`).join('');
+    const qwPicker = document.getElementById('style-picker-qw');
+    if (qwPicker) qwPicker.innerHTML = `<select class="form-select" style="font-size:11px" onchange="applyStyleToTextarea(this,'qw-style-override')">${options}</select>`;
+    const wsPicker = document.getElementById('style-picker-ws');
+    if (wsPicker) wsPicker.innerHTML = `<select class="form-select" style="font-size:11px" onchange="applyStyleToTextarea(this,'ws-style-override')">${options}</select>`;
+    const editPicker = document.getElementById('style-picker-edit');
+    if (editPicker) editPicker.innerHTML = `<select class="form-select" style="font-size:11px" onchange="applyStyleToTextarea(this,'edit-instruction')">${options}</select>`;
+  } catch(e) {}
+}
+
+function applyStyleToTextarea(selectEl, textareaId) {
+  const val = selectEl.value;
+  if (val) {
+    document.getElementById(textareaId).value = val;
+    toast('已填入风格提示词', true);
   }
 }
 
@@ -2973,6 +3000,7 @@ function selectWritingChapter(idx) {
     <div style="border-left:3px solid var(--green);padding-left:12px">
       <div style="font-size:12px;font-weight:600;color:var(--green);margin-bottom:8px">3. 生成章节正文</div>
       <div style="font-size:11px;color:var(--text3);margin-bottom:8px">基于细纲生成完整章节正文，保存为草稿</div>
+      <div id="style-picker-ws" style="margin-bottom:8px"></div>
       <textarea id="ws-style-override" class="form-input" rows="2" placeholder="本次写作风格（可选，留空则用书籍默认风格）。例如：这段战斗要写得更激烈紧凑，对话减少" style="margin-bottom:8px"></textarea>
       <button class="btn btn-sm btn-success" onclick="genChapterContent(${chNum})">&#9998; AI 生成正文</button>
       <div id="chapter-content-area" style="margin-top:10px"></div>
@@ -3354,94 +3382,154 @@ function loadStep6() {
   chapters.forEach(c => { if (!seen.has(c.number)) { seen.add(c.number); allChs.push(c); } });
   allChs.sort((a, b) => b.number - a.number);
 
+  const maxCh = allChs.length ? allChs[0].number : 1;
+
   document.getElementById('step6-panel').innerHTML = `
-    <div style="display:flex;gap:20px;max-width:1200px;margin:0 auto">
-      <!-- 左侧：控制面板 + 故事数据 -->
-      <div style="width:340px;flex-shrink:0">
-        <div class="card" style="margin-bottom:12px">
-          <div class="card-header">&#128269; 审计控制 <span style="margin-left:auto;font-size:12px;font-weight:400"><button class="btn btn-ghost btn-sm" onclick="editBookSettings('${currentBook.id}')">&#9881; 设置</button></span></div>
-          <div class="form-row" style="margin-bottom:8px">
-            <div class="form-group"><label class="form-label">审计章节</label>
-              <select class="form-select" id="audit-chapter">
-                ${allChs.map(c => `<option value="${c.number}">第${c.number}章 (${c.kind==='final'?'最终稿':'草稿'})</option>`).join('')}
-                ${!allChs.length ? '<option value="">无章节</option>' : ''}
-              </select>
-            </div>
+    <div style="display:flex;gap:12px;max-width:1600px;margin:0 auto;align-items:flex-start">
+      <!-- 左栏：控制面板（窄） -->
+      <div style="width:260px;flex-shrink:0">
+        <div class="card" style="margin-bottom:10px">
+          <div class="card-header">&#128269; 审计控制 <span style="margin-left:auto;font-size:12px;font-weight:400"><button class="btn btn-ghost btn-sm" onclick="editBookSettings('${currentBook.id}')">&#9881;</button></span></div>
+          <div class="form-group" style="margin-bottom:6px">
+            <select class="form-select" id="audit-chapter" style="font-size:12px" onchange="loadAuditChapterText();loadSavedAudit()">
+              ${allChs.map(c => `<option value="${c.number}">第${c.number}章 (${c.kind==='final'?'终':'草'})</option>`).join('')}
+              ${!allChs.length ? '<option value="">无章节</option>' : ''}
+            </select>
           </div>
-          <div class="form-group" style="margin-bottom:8px"><label class="form-label">审计范围</label>
-            <select class="form-select" id="audit-mode">
-              <option value="full">完整审计（语言+结构+戏剧）</option>
+          <div class="form-group" style="margin-bottom:6px">
+            <select class="form-select" id="audit-mode" style="font-size:12px">
+              <option value="full">完整审计</option>
               <option value="language">仅语言层</option>
               <option value="structure">仅结构层</option>
               <option value="drama">仅戏剧层</option>
             </select>
           </div>
-          <div style="display:flex;gap:8px;margin-bottom:8px">
-            <button class="btn btn-primary" style="flex:1" onclick="runThreeLayerAudit()">&#128269; 开始审计</button>
-            <button class="btn btn-warning" onclick="doRevise()">&#128295; 自动修订</button>
+          <div style="display:flex;gap:4px;margin-bottom:6px">
+            <button class="btn btn-primary btn-sm" style="flex:1;font-size:11px" onclick="runThreeLayerAudit()">&#128269; 审计</button>
+            <button class="btn btn-warning btn-sm" style="font-size:11px" onclick="doRevise()">&#128295; 修订</button>
           </div>
-          <!-- 标签页切换 -->
-          <div class="mode-tabs" style="margin-bottom:8px">
-            <div class="mode-tab active" id="tab-audit" onclick="switchAuditTab('audit',this)">审计结果</div>
-            <div class="mode-tab" id="tab-story" onclick="switchAuditTab('story',this)">故事数据</div>
-            <div class="mode-tab" id="tab-edit" onclick="switchAuditTab('edit',this)">正文编辑</div>
+          <!-- 标签页 -->
+          <div class="mode-tabs" style="margin-bottom:6px">
+            <div class="mode-tab active" id="tab-audit" onclick="switchAuditTab('audit',this)">审计</div>
+            <div class="mode-tab" id="tab-story" onclick="switchAuditTab('story',this)">故事</div>
+            <div class="mode-tab" id="tab-edit" onclick="switchAuditTab('edit',this)">编辑</div>
+            <div class="mode-tab" id="tab-style" onclick="switchAuditTab('style',this)">风格</div>
           </div>
         </div>
         <!-- 状态提取提醒 -->
-        <div class="card" id="extract-reminder" style="margin-bottom:12px;border:1px solid var(--yellow);background:var(--yellow-bg)">
-          <div style="display:flex;align-items:flex-start;gap:8px;padding:10px 12px">
-            <span style="font-size:16px;flex-shrink:0">&#128161;</span>
+        <div class="card" id="extract-reminder" style="margin-bottom:10px;border:1px solid var(--yellow);background:var(--yellow-bg)">
+          <div style="display:flex;align-items:flex-start;gap:6px;padding:8px 10px">
+            <span style="font-size:14px;flex-shrink:0">&#128161;</span>
             <div style="flex:1;min-width:0">
-              <div style="font-size:12px;font-weight:600;color:var(--yellow);margin-bottom:4px">写正文后别忘了提取故事数据！</div>
-              <div style="font-size:11px;color:var(--text2);line-height:1.5">
-                正文生成时只会自动保存摘要，<b>情感变化、角色关系、伏笔、位置、因果链</b>等信息需要手动提取才能更新到世界状态。
-                如果不提取，<b>下一章生成时看不到这些变化</b>，会丢失连续性。
-              </div>
-              <div style="display:flex;gap:6px;margin-top:8px">
-                <button class="btn btn-primary btn-sm" onclick="extractStoryState();document.getElementById('extract-reminder').style.display='none'" style="font-size:11px">&#128269; 提取当前章节</button>
-                <button class="btn btn-sm" onclick="extractAllStoryState();document.getElementById('extract-reminder').style.display='none'" style="font-size:11px">&#9889; 一键全部提取</button>
-                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('extract-reminder').style.display='none'" style="font-size:11px;margin-left:auto">&#10005; 关闭</button>
+              <div style="font-size:11px;font-weight:600;color:var(--yellow);margin-bottom:3px">别忘了提取故事数据！</div>
+              <div style="font-size:10px;color:var(--text2);line-height:1.4">不提取的话，下一章看不到<b>情感/关系/伏笔</b>变化</div>
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <button class="btn btn-primary btn-sm" onclick="extractStoryState();document.getElementById('extract-reminder').style.display='none'" style="font-size:10px;padding:2px 6px">提取本章</button>
+                <button class="btn btn-sm" onclick="extractAllStoryState();document.getElementById('extract-reminder').style.display='none'" style="font-size:10px;padding:2px 6px">全部</button>
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('extract-reminder').style.display='none'" style="font-size:10px;padding:2px 6px;margin-left:auto">&#10005;</button>
               </div>
             </div>
           </div>
         </div>
         <!-- 故事数据面板 -->
         <div class="card" id="story-data-panel" style="display:none">
-          <div class="card-header">&#128200; 故事追踪 <button class="btn btn-primary btn-sm" style="margin-left:auto;font-size:11px" onclick="extractStoryState()" title="从当前章节正文提取故事状态数据">&#128269; 从章节提取</button><button class="btn btn-sm" style="margin-left:6px;font-size:11px" onclick="extractAllStoryState()" title="自动提取所有未提取章节的故事数据">&#9889; 一键全部提取</button></div>
+          <div class="card-header">&#128200; 故事追踪 <button class="btn btn-primary btn-sm" style="margin-left:auto;font-size:10px;padding:2px 6px" onclick="extractStoryState()">&#128269; 提取</button><button class="btn btn-sm" style="margin-left:4px;font-size:10px;padding:2px 6px" onclick="extractAllStoryState()">&#9889; 全部</button></div>
           <div id="story-data-content"><div class="loading">加载中...</div></div>
         </div>
-        <!-- 正文编辑面板 -->
-        <div class="card" id="edit-panel" style="display:none">
-          <div class="card-header">&#9998; 段落修改</div>
-          <div class="form-desc">选中正文中的文字，输入修改指令后点击"AI 修改"</div>
-          <textarea id="edit-instruction" class="form-input" rows="2" placeholder="修改指令，如：增加环境描写、用古龙风格重写、加入更多对话..." style="width:100%;margin:8px 0"></textarea>
-          <button class="btn btn-primary btn-sm" style="width:100%" onclick="aiRewriteSegment()">&#10024; AI 修改选中段落</button>
-          <div id="rewrite-result" style="margin-top:8px"></div>
-        </div>
       </div>
-      <!-- 右侧：审计结果 + 正文 -->
+      <!-- 中栏：正文 -->
       <div style="flex:1;min-width:0">
         <div id="audit-result-panel"></div>
-        <div id="chapter-text-panel" style="display:none;margin-top:12px"></div>
+        <div id="chapter-text-panel" style="display:none"></div>
+      </div>
+      <!-- 右栏：段落编辑 / 风格提取 -->
+      <div style="width:380px;flex-shrink:0">
+        <!-- 正文编辑面板 -->
+        <div class="card" id="edit-panel" style="display:none;flex-direction:column;max-height:calc(100vh - 200px)">
+          <div class="card-header">&#9998; 段落修改</div>
+          <div class="form-desc" style="font-size:11px">选中中间正文中的文字，输入修改指令后点击 AI 修改</div>
+          <div id="style-picker-edit" style="margin:6px 0"></div>
+          <textarea id="edit-instruction" class="form-input" rows="2" placeholder="修改指令，如：增加环境描写、用古龙风格重写、加入更多对话..." style="width:100%;margin:6px 0;font-size:12px"></textarea>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-primary btn-sm" style="flex:1;font-size:11px" onclick="aiRewriteSegment()">&#10024; AI 修改选中段落</button>
+            <button class="btn btn-warning btn-sm" style="font-size:11px" onclick="rewriteFullChapter()">&#128260; 全文改写</button>
+          </div>
+          <div id="rewrite-result" style="margin-top:8px"></div>
+        </div>
+        <!-- 风格提取面板 -->
+        <div class="card" id="style-panel" style="display:none;flex-direction:column;max-height:calc(100vh - 200px)">
+          <div class="card-header">&#127912; 风格提取</div>
+          <div class="form-desc" style="font-size:11px;margin-bottom:8px">从章节或自定义文本中深度分析写作风格，生成 7 维度专业风格提示词</div>
+          <!-- 输入方式切换 -->
+          <div class="mode-tabs" style="margin-bottom:8px">
+            <div class="mode-tab active" id="style-tab-chapter" onclick="switchStyleInput('chapter',this)">从章节</div>
+            <div class="mode-tab" id="style-tab-text" onclick="switchStyleInput('text',this)">粘贴文本</div>
+          </div>
+          <!-- 从章节 -->
+          <div id="style-input-chapter">
+            <div class="form-group" style="margin-bottom:6px">
+              <label class="form-label" style="font-size:11px">章节范围（最多分析前 16000 字）</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input type="number" id="style-ch-start" value="1" min="1" max="${maxCh}" style="width:60px;font-size:12px" class="form-input">
+                <span style="font-size:12px;color:var(--text3)">至</span>
+                <input type="number" id="style-ch-end" value="${Math.min(5,maxCh)}" min="1" max="${maxCh}" style="width:60px;font-size:12px" class="form-input">
+              </div>
+            </div>
+          </div>
+          <!-- 粘贴文本 -->
+          <div id="style-input-text" style="display:none">
+            <div class="form-group" style="margin-bottom:6px">
+              <label class="form-label" style="font-size:11px">上传文件或粘贴文本（最多 16000 字）</label>
+              <label class="btn btn-sm" style="cursor:pointer;font-size:11px;margin-bottom:4px">
+                &#128194; 选择 TXT/MD 文件
+                <input type="file" accept=".txt,.md,.text" style="display:none" onchange="handleStyleFile(this)">
+              </label>
+              <textarea id="style-sample-text" class="form-textarea" rows="6" style="font-size:12px" placeholder="粘贴要分析的小说正文（任何来源都可以：你写的、其他作者的作品、参考文风...）"></textarea>
+              <div id="style-file-info" style="font-size:10px;color:var(--text3);margin-top:2px"></div>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" style="width:100%;font-size:11px;margin-bottom:8px" onclick="extractStyle()">&#10024; 深度分析风格</button>
+          <div id="style-extract-result" style="display:none;overflow-y:auto;flex:1">
+            <label class="form-label" style="font-size:11px">分析结果（可编辑）</label>
+            <textarea id="style-prompt-text" class="form-textarea" rows="20" style="font-size:11px;line-height:1.6"></textarea>
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <input id="style-name" class="form-input" placeholder="风格名称" style="flex:1;font-size:12px">
+              <button class="btn btn-success btn-sm" style="font-size:11px" onclick="saveStyleProfile()">&#128190; 保存</button>
+            </div>
+          </div>
+          <div style="margin-top:10px;flex-shrink:0">
+            <label class="form-label" style="font-size:11px">已保存的风格</label>
+            <div id="style-profiles-list" style="margin-top:4px"></div>
+          </div>
+        </div>
       </div>
     </div>`;
 
-  // 加载正文（支持选中段落修改）
+  // 加载正文
   loadAuditChapterText();
   // 尝试加载已有审计结果
   loadSavedAudit();
+  // 加载已保存的风格
+  loadStyleProfiles();
+  // 加载风格选择器到段落修改面板
+  loadStylePickers();
 }
 
 function switchAuditTab(tab, el) {
   window._auditTab = tab;
   document.querySelectorAll('#step6-panel .mode-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
+  // 左栏面板
   document.getElementById('story-data-panel').style.display = tab === 'story' ? '' : 'none';
-  document.getElementById('edit-panel').style.display = tab === 'edit' ? '' : 'none';
+  // 右栏面板
+  document.getElementById('edit-panel').style.display = tab === 'edit' ? 'flex' : 'none';
+  document.getElementById('style-panel').style.display = tab === 'style' ? 'flex' : 'none';
+  // 中栏面板：审计结果在审计标签下显示，正文在编辑/风格标签下显示
   document.getElementById('audit-result-panel').style.display = (tab === 'audit') ? '' : 'none';
-  document.getElementById('chapter-text-panel').style.display = (tab === 'edit') ? '' : 'none';
+  document.getElementById('chapter-text-panel').style.display = (tab === 'edit' || tab === 'style' || tab === 'audit') ? '' : 'none';
   if (tab === 'story') loadStoryData();
-  if (tab === 'edit') loadAuditChapterText();
+  if (tab === 'edit' || tab === 'style') loadAuditChapterText();
+  if (tab === 'style') loadStyleProfiles();
 }
 
 async function loadAuditChapterText() {
@@ -3451,11 +3539,11 @@ async function loadAuditChapterText() {
   try {
     const res = await api(`/books/${currentBook.id}/chapters/${ch}`);
     panel.innerHTML = `
-      <div class="card">
+      <div class="card" style="height:calc(100vh - 200px);display:flex;flex-direction:column">
         <div class="card-header">&#128214; 第${ch}章正文 <span style="font-size:11px;color:var(--text3)">(${res.kind} / ${res.chars}字)</span></div>
-        <div style="font-size:12px;color:var(--text3);margin-bottom:8px">可直接编辑下方正文，也可选中段落用左侧 AI 修改</div>
-        <textarea id="chapter-text-body" style="width:100%;min-height:400px;max-height:600px;padding:12px;background:var(--bg-dark);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.8;color:var(--text);resize:vertical;font-family:inherit">${esc(res.content)}</textarea>
-        <div style="display:flex;gap:8px;margin-top:10px">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px">可直接编辑下方正文，也可选中段落用右侧 AI 修改</div>
+        <textarea id="chapter-text-body" style="flex:1;width:100%;min-height:300px;padding:12px;background:var(--bg-dark);border:1px solid var(--border);border-radius:var(--radius);font-size:13px;line-height:1.8;color:var(--text);resize:vertical;font-family:inherit">${esc(res.content)}</textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;flex-shrink:0">
           <button class="btn btn-sm btn-success" onclick="saveEditedContent('${res.kind}')">&#128190; 保存正文</button>
           <span id="edit-save-status" style="font-size:11px;color:var(--text3);line-height:28px"></span>
         </div>
@@ -3519,6 +3607,52 @@ function applyRewrite() {
   if (idx < 0) return toast('未找到选中文本位置', false);
   body.value = body.value.substring(0, idx) + window._rewriteData.rewritten + body.value.substring(idx + window._rewriteData.selected.length);
   toast('已应用修改，请点击"保存正文"确认', true);
+  document.getElementById('rewrite-result').innerHTML = '';
+}
+
+async function rewriteFullChapter() {
+  const ch = parseInt(document.getElementById('audit-chapter')?.value);
+  if (!ch) return toast('请选择章节', false);
+  const instruction = document.getElementById('edit-instruction')?.value?.trim();
+  if (!instruction) return toast('请输入改写指令', false);
+  if (!confirm('将对整章正文进行改写，可能需要 1-2 分钟。继续？')) return;
+  const resultDiv = document.getElementById('rewrite-result');
+  resultDiv.innerHTML = '<div class="loading">AI 正在改写全文...</div>';
+  try {
+    const body = document.getElementById('chapter-text-body');
+    const fullText = body ? body.value : '';
+    const res = await api(`/books/${currentBook.id}/ai-rewrite-segment`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ chapter: ch, original_text: fullText, instruction, context_before: '', context_after: '' }),
+    });
+    if (!res.ok) { resultDiv.innerHTML = `<div class="error">改写失败</div>`; return; }
+    const rewritten = res.rewritten || '';
+    // 对比显示
+    resultDiv.innerHTML = `
+      <div style="margin-bottom:8px;font-size:11px;font-weight:600;color:var(--green)">改写结果（${rewritten.length}字）：</div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--text3);margin-bottom:4px">原文</div>
+          <div style="padding:8px;background:var(--bg-dark);border-radius:4px;font-size:11px;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;border-left:3px solid var(--text3)">${esc(fullText.substring(0,2000))}${fullText.length>2000?'...':''}</div>
+        </div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:10px;color:var(--green);margin-bottom:4px">改写后</div>
+          <div style="padding:8px;background:var(--bg-dark);border-radius:4px;font-size:11px;line-height:1.6;white-space:pre-wrap;max-height:300px;overflow-y:auto;border-left:3px solid var(--green)">${esc(rewritten.substring(0,2000))}${rewritten.length>2000?'...':''}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-sm btn-success" onclick="applyFullRewrite()">应用改写</button>
+        <button class="btn btn-sm" onclick="document.getElementById('rewrite-result').innerHTML=''">取消</button>
+      </div>`;
+    window._fullRewriteData = rewritten;
+  } catch (e) { resultDiv.innerHTML = `<div class="error">${e.message}</div>`; }
+}
+
+function applyFullRewrite() {
+  const body = document.getElementById('chapter-text-body');
+  if (!body || !window._fullRewriteData) return;
+  body.value = window._fullRewriteData;
+  toast('已应用改写，请点击"保存正文"确认', true);
   document.getElementById('rewrite-result').innerHTML = '';
 }
 
@@ -3868,6 +4002,122 @@ async function doRevise() {
     if (!res.ok && res.stderr) toast(res.stderr, false);
     await loadBookData();
   } catch (e) { toast('修订失败: ' + e.message, false); }
+}
+
+// ── 风格提示词管理 ──────────────────────────────────────────────────────────
+
+window._styleInputMode = 'chapter';
+
+function switchStyleInput(mode, el) {
+  window._styleInputMode = mode;
+  document.querySelectorAll('#style-panel .mode-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('style-input-chapter').style.display = mode === 'chapter' ? '' : 'none';
+  document.getElementById('style-input-text').style.display = mode === 'text' ? '' : 'none';
+}
+
+function handleStyleFile(input) {
+  if (!input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const text = e.target.result;
+    document.getElementById('style-sample-text').value = text;
+    document.getElementById('style-file-info').textContent = `已加载：${input.files[0].name}（${(text.length/1000).toFixed(1)}k 字）`;
+  };
+  reader.readAsText(input.files[0], 'utf-8');
+}
+
+async function extractStyle() {
+  if (!currentBook) return toast('请先选择书籍', false);
+  const mode = window._styleInputMode || 'chapter';
+  const body = {};
+  if (mode === 'text') {
+    const sampleText = document.getElementById('style-sample-text')?.value.trim();
+    if (!sampleText) return toast('请粘贴或上传文本', false);
+    body.sample_text = sampleText;
+  } else {
+    body.chapter_start = parseInt(document.getElementById('style-ch-start')?.value) || 1;
+    body.chapter_end = parseInt(document.getElementById('style-ch-end')?.value) || body.chapter_start;
+  }
+  toast('正在深度分析写作风格（约 30-60 秒）...', 'loading');
+  try {
+    const res = await api(`/books/${currentBook.id}/extract-style`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (res.ok !== undefined && res.style_prompt) {
+      document.getElementById('style-extract-result').style.display = '';
+      document.getElementById('style-prompt-text').value = res.style_prompt;
+      toast(`风格分析完成（来源：${res.source}，${res.chars_analyzed} 字）`, true);
+    } else {
+      toast(res.detail || '提取失败', false);
+    }
+  } catch (e) { toast('提取失败: ' + e.message, false); }
+}
+
+async function saveStyleProfile() {
+  if (!currentBook) return toast('请先选择书籍', false);
+  const name = document.getElementById('style-name')?.value.trim();
+  const prompt = document.getElementById('style-prompt-text')?.value.trim();
+  if (!name) return toast('请输入风格名称', false);
+  if (!prompt) return toast('风格提示词为空', false);
+  try {
+    const res = await api(`/books/${currentBook.id}/style-profiles`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, style_prompt: prompt }),
+    });
+    if (res.ok) {
+      toast('风格已保存', true);
+      document.getElementById('style-name').value = '';
+      loadStyleProfiles();
+    }
+  } catch (e) { toast('保存失败: ' + e.message, false); }
+}
+
+async function loadStyleProfiles() {
+  if (!currentBook) return;
+  const listEl = document.getElementById('style-profiles-list');
+  if (!listEl) return;
+  try {
+    const profiles = await api(`/books/${currentBook.id}/style-profiles`);
+    if (!Array.isArray(profiles) || !profiles.length) {
+      listEl.innerHTML = '<div style="font-size:11px;color:var(--text3);padding:4px 0">暂无保存的风格</div>';
+      return;
+    }
+    listEl.innerHTML = profiles.map(p => `
+      <div style="border:1px solid var(--border);border-radius:4px;padding:8px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:12px;font-weight:600;flex:1">${esc(p.name)}</span>
+          <button class="btn btn-sm" style="font-size:10px;padding:1px 6px" onclick="applyStyleProfile('${esc(p.name)}')" title="加载到编辑框">&#128193;</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px" onclick="deleteStyleProfile('${esc(p.name)}')" title="删除">&#128465;</button>
+        </div>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px;line-height:1.4;max-height:48px;overflow-y:auto">${esc(p.style_prompt.substring(0,100))}...</div>
+      </div>
+    `).join('');
+    // 缓存供 applyStyleProfile 使用
+    window._styleProfiles = profiles;
+  } catch (e) {
+    listEl.innerHTML = '<div style="font-size:11px;color:var(--text3)">加载失败</div>';
+  }
+}
+
+function applyStyleProfile(name) {
+  const profiles = window._styleProfiles || [];
+  const p = profiles.find(x => x.name === name);
+  if (!p) return;
+  document.getElementById('style-extract-result').style.display = '';
+  document.getElementById('style-prompt-text').value = p.style_prompt;
+  document.getElementById('style-name').value = p.name;
+  toast('已加载到编辑框', true);
+}
+
+async function deleteStyleProfile(name) {
+  if (!confirm(`确定删除风格"${name}"？`)) return;
+  try {
+    await api(`/books/${currentBook.id}/style-profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    toast('已删除', true);
+    loadStyleProfiles();
+  } catch (e) { toast('删除失败: ' + e.message, false); }
 }
 
 // ── Step 7: 导出 ──────────────────────────────────────────────────────────

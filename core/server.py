@@ -3203,6 +3203,219 @@ async def ai_generate_chapter_outlines(book_id: str):
         raise HTTPException(500, f"章纲生成失败：{e}")
 
 
+# ── 风格提示词管理 ────────────────────────────────────────────────────────────
+
+class ExtractStyleReq(BaseModel):
+    chapter_start: int = 0
+    chapter_end: int = 0
+    sample_text: str = ""  # 直接粘贴的文本
+
+@app.post("/api/books/{book_id}/extract-style")
+async def extract_style(book_id: str, req: ExtractStyleReq):
+    """从章节或自定义文本提取写作风格提示词"""
+    _load_env()
+    sm = _sm(book_id)
+
+    combined = ""
+    source_info = ""
+
+    if req.sample_text and req.sample_text.strip():
+        # 使用用户粘贴/上传的文本
+        combined = req.sample_text.strip()
+        source_info = f"自定义文本（{len(combined)} 字）"
+    else:
+        # 从章节提取
+        ch_start = req.chapter_start or 1
+        ch_end = req.chapter_end or 0
+        if ch_end < ch_start:
+            ch_end = ch_start
+
+        samples = []
+        for ch in range(ch_start, ch_end + 1):
+            content = sm.read_final(ch) or sm.read_draft(ch)
+            if content:
+                samples.append({"chapter": ch, "text": content})
+
+        if not samples:
+            raise HTTPException(404, f"第 {ch_start}～{ch_end} 章没有找到正文，也没有提供自定义文本")
+
+        source_info = f"第 {ch_start}～{ch_end} 章（{len(samples)} 章）"
+        combined = "\n\n---\n\n".join(
+            f"### 第{s['chapter']}章\n{s['text']}" for s in samples
+        )
+
+    # 上限提高到 16000 字（约 8000-10000 tokens）
+    MAX_CHARS = 16000
+    if len(combined) > MAX_CHARS:
+        combined = combined[:MAX_CHARS] + "\n\n（文本已截断，仅分析前 16000 字）"
+
+    try:
+        llm = _create_llm(temperature=0.15)
+    except Exception as e:
+        raise HTTPException(400, f"LLM 创建失败：{e}")
+
+    from core.llm import LLMMessage
+
+    system_msg = """你是一位顶级的文学编辑和写作教练，拥有 20 年以上的小说编辑经验。你擅长从文本中精准分析作者的写作风格，并提炼成可直接指导 AI 写作的、高度具体且可操作的风格提示词。
+
+你的分析必须基于文本中的真实证据，不得泛泛而谈。每一个风格特征都要给出具体的量化指标或可识别的模式，而非模糊的形容词。"""
+
+    prompt = f"""请对以下小说正文进行深度风格分析，并输出一份专业的风格提示词。
+
+这份提示词将被直接用于指导 AI 进行同风格写作，因此必须足够具体、可执行，避免空泛的形容词。
+
+## 待分析文本（来源：{source_info}）
+{combined}
+
+## 分析框架
+
+请按以下维度逐项分析，每个维度都必须：
+1. 给出该维度的量化特征（如"对话占比约 40%"、"平均句长 15 字"、"短句(<8字)占比 30%"）
+2. 给出该维度的典型写法模式（如"动作场景用 3-4 字短句连击"、"环境描写通常以'风/光/影'起笔"）
+3. 给出 1-2 个原文中的典型例句
+
+### 维度 1：语言微观特征
+- 句式结构：长短句比例、句式变化节奏、是否偏好特定句型（如倒装、排比、反问）
+- 用词偏好：口语化 vs 书面化、是否有惯用动词/形容词、修辞密度
+- 标点习惯：逗号/句号密度、是否善用破折号/省略号、分段长度
+
+### 维度 2：叙事视角与声音
+- 视角类型（全知/有限/第一人称）及视角切换频率
+- 叙述者声音的"温度"：冷静旁观 / 热情介入 / 幽默吐槽 / 诗意抒情
+- 与读者的距离感：亲密对话式 / 客观报告式 / 史诗叙述式
+
+### 维度 3：节奏与信息密度
+- 场景推进速度：慢镜头（细节铺陈）vs 快剪（动作跳切）
+- 信息密度：每段承载的剧情信息量（低=重氛围 / 高=重推进）
+- 节奏变化模式：张弛交替的规律（如"两段对话+一段描写+一个动作"）
+
+### 维度 4：对话体系
+- 对话密度（占总篇幅比例）
+- 对话标签习惯：用"说"/用动作替代/省略标签
+- 角色语言区分度：不同角色的语气差异程度
+- 对话与动作的交织方式
+
+### 维度 5：描写偏好
+- 五感描写分布：视觉/听觉/触觉/嗅觉/味觉的侧重
+- 环境描写：频率、篇幅、起笔方式
+- 心理描写：外化（通过动作暗示）vs 内化（直接陈述想法）
+- 动作描写：简洁干脆 vs 详尽拆解
+
+### 维度 6：结构手法
+- 章节开头惯用方式（场景切入 / 对话起笔 / 回忆 / 悬念）
+- 章节结尾惯用方式（悬念钩子 / 情感余韵 / 动作定格）
+- 场景转场方式（时间跳 / 空间切 / 视角转）
+
+### 维度 7：情感工程
+- 情感表达策略：克制留白 vs 直接渲染
+- 情感张力的构建手法（预期违背 / 延迟释放 / 对比冲击）
+- 读者情绪引导路径（如"平静→不安→紧张→释放"）
+
+## 输出格式
+
+请输出一份完整的风格提示词，格式如下（直接输出，不要代码块包裹）：
+
+---
+
+### 语言风格
+[具体的句式、用词、标点特征，含量化指标]
+
+### 叙事声音
+[视角类型、叙述温度、与读者距离]
+
+### 节奏模式
+[推进速度、信息密度、节奏变化规律]
+
+### 对话体系
+[密度、标签习惯、语言区分度]
+
+### 描写偏好
+[五感侧重、环境/心理/动作描写方式]
+
+### 结构手法
+[开头/结尾/转场的惯用模式]
+
+### 情感工程
+[表达策略、张力构建、情绪引导路径]
+
+### 综合写作指令
+[2-3 句话总结，可直接粘贴到 AI 写作指令中]
+
+---
+
+每个维度 2-4 句话，总共 400-800 字。必须基于文本中的真实特征，拒绝空泛描述。"""
+
+    try:
+        resp = await asyncio.to_thread(
+            llm.complete,
+            [LLMMessage("system", system_msg),
+             LLMMessage("user", prompt)],
+        )
+        style_prompt = resp.content.strip()
+        # 去掉可能的代码块包裹
+        if style_prompt.startswith("```"):
+            style_prompt = style_prompt.strip("`")
+            lines = style_prompt.split("\n")
+            if lines and (lines[0].strip() in ("text", "markdown", "") or lines[0].startswith("text")):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "":
+                lines = lines[:-1]
+            style_prompt = "\n".join(lines).strip()
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(500, f"风格提取失败：{e}")
+
+    return {"ok": True, "style_prompt": style_prompt, "source": source_info, "chars_analyzed": len(combined)}
+
+
+class SaveStyleReq(BaseModel):
+    name: str
+    style_prompt: str
+
+@app.post("/api/books/{book_id}/style-profiles")
+def save_style_profile(book_id: str, req: SaveStyleReq):
+    """保存风格提示词"""
+    sm = _sm(book_id)
+    profiles_path = sm.state_dir / "style_profiles.json"
+    profiles = []
+    if profiles_path.exists():
+        profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
+    # 同名更新
+    existing = next((p for p in profiles if p["name"] == req.name), None)
+    if existing:
+        existing["style_prompt"] = req.style_prompt
+        existing["updated_at"] = datetime.now(timezone.utc).isoformat()
+    else:
+        profiles.append({
+            "name": req.name,
+            "style_prompt": req.style_prompt,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    profiles_path.write_text(json.dumps(profiles, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "name": req.name}
+
+@app.get("/api/books/{book_id}/style-profiles")
+def get_style_profiles(book_id: str):
+    """获取所有保存的风格提示词"""
+    sm = _sm(book_id)
+    profiles_path = sm.state_dir / "style_profiles.json"
+    if not profiles_path.exists():
+        return []
+    return json.loads(profiles_path.read_text(encoding="utf-8"))
+
+@app.delete("/api/books/{book_id}/style-profiles/{name}")
+def delete_style_profile(book_id: str, name: str):
+    """删除风格提示词"""
+    sm = _sm(book_id)
+    profiles_path = sm.state_dir / "style_profiles.json"
+    if not profiles_path.exists():
+        raise HTTPException(404, "无风格数据")
+    profiles = json.loads(profiles_path.read_text(encoding="utf-8"))
+    profiles = [p for p in profiles if p["name"] != name]
+    profiles_path.write_text(json.dumps(profiles, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True}
+
+
 # ── /api/action/*  三层审计 ───────────────────────────────────────────────────
 
 @app.post("/api/books/{book_id}/three-layer-audit")
