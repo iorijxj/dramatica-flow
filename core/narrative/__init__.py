@@ -49,6 +49,9 @@ class ChapterOutlineSchema(BaseModel):
     target_words: int = 4000
     writing_notes: str = ""  # 整章写作基调指导
     pov: str = ""  # 视角角色说明
+    # ── 多线叙事字段（供 WritingPipeline 的线程/POV 解析读取）──
+    thread_id: str = "thread_main"  # 该章节所属叙事线程；单线写作固定为 thread_main
+    pov_character_id: str = ""  # 该章节视角角色 ID
 
 
 class SceneCardSchema(BaseModel):

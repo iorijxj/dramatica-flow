@@ -91,6 +91,7 @@ class DeepSeekProvider(LLMProvider):
         self.client = OpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
+            timeout=(30, 600),
         )
 
     def _build_kwargs(self, stream: bool = False) -> dict:
@@ -147,6 +148,7 @@ class OllamaProvider(LLMProvider):
         self.client = OpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
+            timeout=(30, 600),
         )
 
     def _build_kwargs(self, stream: bool = False) -> dict:
@@ -417,6 +419,42 @@ def parse_llm_json_list(
 
 # ── Retry 装饰器 ──────────────────────────────────────────────────────────────
 
+# 限流(429/排队)与临时网络错误的最大重试次数（高于普通错误）
+_RETRY_HARD_CAP = 7
+
+
+def _retry_kind(e: Exception) -> str:
+    """判断错误类型：
+    - "rate_limit"：服务端限流/排队（429），应放慢指数退避多等一会儿
+    - "network"   ：连接/超时/断线重置，应稍等后重连
+    - ""          ：其他错误（JSON/格式等），走原快速重试
+    """
+    msg = str(e).lower()
+    if (
+        "429" in msg
+        or "rate limit" in msg
+        or "too many requests" in msg
+        or "rate_limit_reached" in msg
+    ):
+        return "rate_limit"
+    if (
+        "timeout" in msg
+        or "timed out" in msg
+        or "read timed" in msg
+        or "connection" in msg
+        or "refused" in msg
+        or "econnreset" in msg
+        or "econnrefused" in msg
+        or "server disconnected" in msg
+        or "remote disconnected" in msg
+        or "bad gateway" in msg
+        or "gateway error" in msg
+        or "internal server error" in msg
+    ):
+        return "network"
+    return ""
+
+
 def with_retry(
     fn: Callable[[], T],
     max_attempts: int = 3,
@@ -424,19 +462,37 @@ def with_retry(
     on_retry: Callable[[int, Exception], None] | None = None,
 ) -> T:
     """
-    同步重试包装器。
-    LLMParseError 会触发重试；网络错误也会重试。
+    同步重试包装器，支持排队(429)与断线优化。
+
+    - rate_limit(限流/排队)：指数退避 + 随机抖动，最多 _RETRY_HARD_CAP 次，
+      GLM-4.7-Flash 这类 1 并发模型高峰期排队时会自动等待而非失败。
+    - network(连接/超时/断线)：中速退避重连，也允许更多尝试。
+    - 其他错误(JSON/格式)：维持原快速重试，最多 max_attempts 次。
     """
+    import random
     last_error: Exception = RuntimeError("Unknown error")
-    for attempt in range(1, max_attempts + 1):
+    hard_cap = int(max_attempts)  # 普通错误次数
+    for attempt in range(1, _RETRY_HARD_CAP + 1):
         try:
             return fn()
         except Exception as e:
             last_error = e
-            if attempt < max_attempts:
+            kind = _retry_kind(e)
+            # 普通错误用 max_attempts，排队/断线用更大上限
+            effective_max = hard_cap if not kind else _RETRY_HARD_CAP
+            if attempt < effective_max:
                 if on_retry:
                     on_retry(attempt, e)
-                time.sleep(delay_seconds * attempt)
+                if kind == "rate_limit":
+                    # 排队：指数退避 + 抖动，上限约 60s
+                    backoff = min(60.0, 3.0 * (2 ** (attempt - 1)))
+                    time.sleep(backoff + random.uniform(0, 2.0))
+                elif kind == "network":
+                    # 断线：中速退避重连，上限约 30s
+                    backoff = min(30.0, 2.0 * (2 ** (attempt - 1)))
+                    time.sleep(backoff + random.uniform(0, 1.0))
+                else:
+                    time.sleep(delay_seconds * attempt)
     raise last_error
 
 

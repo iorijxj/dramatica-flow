@@ -313,13 +313,16 @@ class StateManager:
             state.relationships.append(rel)
         rel.strength = max(-100, min(100, rel.strength + delta))
         rel.history.append(RelationshipDelta(chapter=chapter, delta=delta, reason=reason))
-        # 自动更新关系类型
-        if rel.strength >= 50:
-            rel.type = RelationshipType.ALLY
-        elif rel.strength <= -50:
-            rel.type = RelationshipType.ENEMY
-        else:
-            rel.type = RelationshipType.NEUTRAL
+        # 自动更新关系类型：仅对"强度型"关系演替，不覆盖语义型
+        # （romantic / family / mentor / rival 等由人设定，不受强度支配）
+        _plot_types = {RelationshipType.NEUTRAL, RelationshipType.ALLY, RelationshipType.ENEMY}
+        if rel.type in _plot_types:
+            if rel.strength >= 50:
+                rel.type = RelationshipType.ALLY
+            elif rel.strength <= -50:
+                rel.type = RelationshipType.ENEMY
+            else:
+                rel.type = RelationshipType.NEUTRAL
         self.write_world_state(state)
 
     def learn_info(

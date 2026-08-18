@@ -188,8 +188,21 @@ def _load_env():
     load_dotenv(ENV_PATH, override=True)
 
 
+# 常见 LLM 厂商预设（OpenAI 兼容接口）。base_url/model 为空时表示需用户自行填写。
+LLM_PROVIDERS: dict[str, dict] = {
+    "openai":      {"label": "OpenAI",             "base_url": "https://api.openai.com/v1",                          "model": "gpt-4o",                  "key_hint": "platform.openai.com 获取"},
+    "zhipu":       {"label": "智谱GLM",            "base_url": "https://open.bigmodel.cn/api/paas/v4/",              "model": "glm-4",                   "key_hint": "open.bigmodel.cn 获取"},
+    "moonshot":    {"label": "Moonshot",           "base_url": "https://api.moonshot.cn/v1",                        "model": "moonshot-v1-8k",          "key_hint": "platform.moonshot.cn 获取"},
+    "qwen":        {"label": "通义千问",           "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",  "model": "qwen-plus",               "key_hint": "bailian.console.aliyun.com 获取"},
+    "doubao":      {"label": "豆包·火山方舟",     "base_url": "https://ark.cn-beijing.volces.com/api/v3",            "model": "doubao-pro-32k",          "key_hint": "console.volcengine.com/ark 获取"},
+    "siliconflow": {"label": "硅基流动",           "base_url": "https://api.siliconflow.cn/v1",                      "model": "deepseek-ai/DeepSeek-V3", "key_hint": "siliconflow.cn 获取"},
+    "openrouter":  {"label": "OpenRouter",          "base_url": "https://openrouter.ai/api/v1",                      "model": "openrouter/auto",         "key_hint": "openrouter.ai 获取"},
+    "custom":      {"label": "自定义/中转站",      "base_url": "",                                                    "model": "",                        "key_hint": "任意 OpenAI 兼容接口"},
+}
+
+
 def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MODEL", max_tokens: int | None = None):
-    """创建 LLM 实例（支持 deepseek / ollama / openai / zhipu / moonshot / qwen）"""
+    """创建 LLM 实例（支持 deepseek / ollama / openai / zhipu / moonshot / qwen 等厂商）"""
     from core.llm import LLMConfig, create_provider
     provider = os.environ.get("LLM_PROVIDER", "deepseek").lower()
     temp = temperature if temperature is not None else float(os.environ.get("DEFAULT_TEMPERATURE", "0.7"))
@@ -204,7 +217,7 @@ def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MOD
             temperature=temp,
             max_tokens=max_tokens,
         )
-        return create_provider(cfg)
+        return _RetryLLMWrap(create_provider(cfg))
 
     # 通用 OpenAI 兼容模式（deepseek / openai / zhipu / moonshot / qwen 都走这里）
     env_prefix = provider.upper() + "_"  # 如 ZHIPU_, MOONSHOT_
@@ -213,9 +226,32 @@ def _create_llm(temperature: float | None = None, model_env: str = "DEEPSEEK_MOD
         raise HTTPException(400, f"请先配置 {provider} 的 API Key")
     base_url = os.environ.get(f"{env_prefix}BASE_URL",
                                os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"))
-    model = os.environ.get(f"{env_prefix}MODEL", os.environ.get(model_env, os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")))
+    # 仅当显式指定覆盖模型时生效（如 AUDITOR_MODEL）；默认调用不覆盖厂商模型
+    model = (os.environ.get(model_env) if model_env != "DEEPSEEK_MODEL" else None)
+    if not model:
+        model = os.environ.get(f"{env_prefix}MODEL") or os.environ.get("DEEPSEEK_MODEL") or "deepseek-chat"
     cfg = LLMConfig(api_key=key, base_url=base_url, model=model, temperature=temp, max_tokens=max_tokens)
-    return create_provider(cfg)
+    return _RetryLLMWrap(create_provider(cfg))
+
+
+class _RetryLLMWrap:
+    """给 LLM provider 的 complete 包一层排队/断线智能重试。
+    仅用于 server 端业务端点；CLI 管线(create_provider)与连接测试不受影响，避免双重重试。
+    """
+    def __init__(self, llm):
+        self._llm = llm
+
+    def complete(self, messages):
+        from core.llm import with_retry
+        return with_retry(
+            lambda: self._llm.complete(messages),
+            max_attempts=3,
+            on_retry=lambda a, e: logging.warning(f"LLM 调用排队/断线，自动重试(第{a}次)：{e}"),
+        )
+
+    def stream(self, messages, on_chunk):
+        # 流式目前保留原逻辑，断线重连如需可在此基础上扩展
+        return self._llm.stream(messages, on_chunk)
 
 
 # ── 请求模型 ──────────────────────────────────────────────────────────────────
@@ -2449,10 +2485,14 @@ async def extract_story_state(book_id: str, req: ExtractStoryStateReq):
                 ws.relationships.append(rel)
             rel.strength = max(-100, min(100, rel.strength + delta))
             rel.history.append(RelationshipDelta(chapter=req.chapter, delta=delta, reason=reason))
-            if rel.strength >= 50:
-                rel.type = RelationshipType.ALLY
-            elif rel.strength <= -50:
-                rel.type = RelationshipType.ENEMY
+            # 自动更新关系类型：仅对"强度型"关系演替，不覆盖语义型
+            # （romantic / family / mentor / rival 等由人设定，不受强度支配）
+            _plot_types = {RelationshipType.NEUTRAL, RelationshipType.ALLY, RelationshipType.ENEMY}
+            if rel.type in _plot_types:
+                if rel.strength >= 50:
+                    rel.type = RelationshipType.ALLY
+                elif rel.strength <= -50:
+                    rel.type = RelationshipType.ENEMY
             applied["relationships"] += 1
 
     # 新伏笔
@@ -2546,6 +2586,12 @@ async def extract_story_state(book_id: str, req: ExtractStoryStateReq):
             "thread_id": _resolve_thread_id(ke_char),
         }
         ws.timeline.append(event)
+        # 同步更新事件所属线程的 last_active_chapter（与 sm.add_timeline_event 保持一致）
+        tid = event["thread_id"]
+        if tid:
+            for t in ws.threads:
+                if t.id == tid and req.chapter > t.last_active_chapter:
+                    t.last_active_chapter = req.chapter
         applied["timeline"] += 1
 
     # 更新 current_chapter
@@ -3686,6 +3732,22 @@ def get_settings():
         result["custom_api_key"] = vals.get(f"{prefix}API_KEY", "")
         if result["custom_api_key"] and len(result["custom_api_key"]) > 6:
             result["custom_api_key"] = result["custom_api_key"][:6] + "***"
+    # 各厂商预设及其已保存配置（供前端各标签页回填）
+    from dotenv import dotenv_values
+    pvals = dotenv_values(ENV_PATH) if ENV_PATH.exists() else {}
+    result["providers"] = {}
+    for p, meta in LLM_PROVIDERS.items():
+        pfx = p.upper() + "_"
+        base = pvals.get(f"{pfx}BASE_URL", "") or meta["base_url"]
+        model = pvals.get(f"{pfx}MODEL", "") or meta["model"]
+        key = pvals.get(f"{pfx}API_KEY", "")
+        result["providers"][p] = {
+            "base_url": base,
+            "model": model,
+            "api_key": (key[:6] + "***") if key and len(key) > 6 else key,
+        }
+    result["providers"]["deepseek"] = {"base_url": result["deepseek_base_url"], "model": result["deepseek_model"], "api_key": result["deepseek_api_key"]}
+    result["providers"]["ollama"] = {"base_url": result["ollama_base_url"], "model": result["ollama_model"], "api_key": ""}
     return result
 
 
@@ -3747,14 +3809,29 @@ def save_settings(req: SaveSettingsReq):
     lines.append(f"OLLAMA_BASE_URL={req.ollama_base_url}")
     lines.append(f"OLLAMA_MODEL={req.ollama_model}")
     lines.append("")
-    # 自定义提供商配置（openai / zhipu / moonshot / qwen / custom）
+    # 自定义/云端提供商配置（openai / zhipu / moonshot / qwen / doubao / siliconflow / openrouter / custom）
     provider = req.llm_provider.lower()
-    if provider not in ("deepseek", "ollama"):
-        env_prefix = provider.upper() + "_"
-        lines.append(f"# {provider.upper()} 配置")
-        lines.append(f"{env_prefix}BASE_URL={req.custom_base_url}")
-        lines.append(f"{env_prefix}MODEL={req.custom_model}")
-        lines.append(f"{env_prefix}API_KEY={req.custom_api_key}")
+    from dotenv import dotenv_values
+    prev = dotenv_values(ENV_PATH) if ENV_PATH.exists() else {}
+    active_prefix = provider.upper() + "_"
+    for p, meta in LLM_PROVIDERS.items():
+        pfx = p.upper() + "_"
+        base = prev.get(f"{pfx}BASE_URL", "") or meta["base_url"]
+        model = prev.get(f"{pfx}MODEL", "") or meta["model"]
+        key = prev.get(f"{pfx}API_KEY", "")
+        if pfx == active_prefix:
+            # 激活提供商使用表单值覆盖，未填则沿用预设/既有值
+            base = req.custom_base_url or base
+            model = req.custom_model or model
+            if req.custom_api_key:
+                if req.custom_api_key.endswith("***"):
+                    key = key  # 掩码值：保留既有 Key 不变
+                else:
+                    key = req.custom_api_key
+        lines.append(f"# {meta['label']} 配置")
+        lines.append(f"{pfx}BASE_URL={base}")
+        lines.append(f"{pfx}MODEL={model}")
+        lines.append(f"{pfx}API_KEY={key}")
         lines.append("")
     lines.append("# 写作参数")
     lines.append(f"DEFAULT_TEMPERATURE={req.default_temperature}")
@@ -3776,7 +3853,10 @@ def save_settings(req: SaveSettingsReq):
     if provider not in ("deepseek", "ollama"):
         env_prefix = provider.upper() + "_"
         if req.custom_api_key:
-            os.environ[f"{env_prefix}API_KEY"] = req.custom_api_key
+            if req.custom_api_key.endswith("***"):
+                os.environ[f"{env_prefix}API_KEY"] = prev.get(f"{env_prefix}API_KEY", "")
+            else:
+                os.environ[f"{env_prefix}API_KEY"] = req.custom_api_key
         if req.custom_base_url:
             os.environ[f"{env_prefix}BASE_URL"] = req.custom_base_url
         if req.custom_model:

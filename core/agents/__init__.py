@@ -303,7 +303,7 @@ class WriterAgent:
   "resource_changes": ["道具/资源变化，如「林尘的玉佩碎裂」"],
   "new_hooks": ["新埋下的伏笔，一句话描述"],
   "resolved_hooks": ["已回收的伏笔 ID 列表"],
-  "relationship_changes": ["关系变化，如「林尘-慕雪：从-80变为-60，原因：慕雪第一次动摇」"],
+  "relationship_changes": ["关系变化，直接用增量，如「林尘-慕雪：+20，慕雪第一次动摇」"],
   "info_revealed": [{"character_id": "角色ID", "info_key": "信息标识", "content": "角色得知了什么"}],
   "character_position_changes": [{"character_id": "角色ID", "location_id": "地点ID"}],
   "emotional_changes": [{"character_id": "角色ID", "emotion": "情绪", "intensity": 7, "trigger": "触发原因"}]

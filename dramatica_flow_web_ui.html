@@ -409,6 +409,7 @@ async function api(endpoint, opts) {
 }
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escAttr(s) { return esc(s); }
 
 const STYLES = {
   'hot-blood': '热血升级', 'cultivation': '仙侠修真', 'urban-business': '都市商战',
@@ -457,11 +458,11 @@ function updateStepsBar() {
   if (apiConfigured) {
     indicator.style.display = '';
     document.getElementById('config-dot').style.background = 'var(--green)';
-    const providerNames = {deepseek:'DeepSeek',ollama:'Ollama',openai:'OpenAI',zhipu:'智谱GLM',moonshot:'Moonshot',qwen:'通义千问'};
+    const providerNames = {deepseek:'DeepSeek',ollama:'Ollama',openai:'OpenAI',zhipu:'智谱GLM',moonshot:'Moonshot',qwen:'通义千问',doubao:'豆包',siliconflow:'硅基流动',openrouter:'OpenRouter',custom:'自定义'};
     document.getElementById('config-text').textContent = providerNames[apiProvider] || apiProvider;
   } else indicator.style.display = 'none';
   const sb = document.getElementById('topbar-settings-btn');
-  const providerNames = {deepseek:'DeepSeek',ollama:'Ollama',openai:'OpenAI',zhipu:'智谱GLM',moonshot:'Moonshot',qwen:'通义千问'};
+  const providerNames = {deepseek:'DeepSeek',ollama:'Ollama',openai:'OpenAI',zhipu:'智谱GLM',moonshot:'Moonshot',qwen:'通义千问',doubao:'豆包',siliconflow:'硅基流动',openrouter:'OpenRouter',custom:'自定义'};
   sb.innerHTML = apiConfigured ? ('&#9881; ' + (providerNames[apiProvider] || apiProvider)) : '&#9881;';
   document.querySelectorAll('.step-item').forEach(s => {
     const sn = parseInt(s.dataset.step);
@@ -622,123 +623,150 @@ async function loadBookData() {
 
 // ── Step 1: API 配置 ──────────────────────────────────────────────────────
 
+// ── LLM 厂商预设（与后端 LLM_PROVIDERS 对应）─────────────────────────────
+// 每个厂商预置官方 Base URL、模型名与获取提示，不懂代码也能直接填 Key。
+const PROVIDERS = {
+  deepseek:   {label:'DeepSeek',       keyHint:'platform.deepseek.com 获取',   base:'https://api.deepseek.com/v1',                          model:'deepseek-chat',       needKey:true},
+  ollama:     {label:'Ollama（本地）', keyHint:'无需 API Key',                 base:'http://localhost:11434/v1',                          model:'llama3.1',            needKey:false},
+  openai:     {label:'OpenAI',         keyHint:'platform.openai.com 获取',     base:'https://api.openai.com/v1',                          model:'gpt-4o',              needKey:true},
+  zhipu:      {label:'智谱GLM',        keyHint:'open.bigmodel.cn 获取',        base:'https://open.bigmodel.cn/api/paas/v4/',              model:'glm-4',               needKey:true},
+  moonshot:   {label:'Moonshot',       keyHint:'platform.moonshot.cn 获取',    base:'https://api.moonshot.cn/v1',                         model:'moonshot-v1-8k',      needKey:true},
+  qwen:       {label:'通义千问',       keyHint:'bailian.console.aliyun.com 获取', base:'https://dashscope.aliyuncs.com/compatible-mode/v1', model:'qwen-plus',           needKey:true},
+  doubao:     {label:'豆包·火山方舟', keyHint:'console.volcengine.com/ark 获取', base:'https://ark.cn-beijing.volces.com/api/v3',           model:'doubao-pro-32k',      needKey:true},
+  siliconflow:{label:'硅基流动',       keyHint:'siliconflow.cn 获取',          base:'https://api.siliconflow.cn/v1',                      model:'deepseek-ai/DeepSeek-V3', needKey:true},
+  openrouter: {label:'OpenRouter',     keyHint:'openrouter.ai 获取',           base:'https://openrouter.ai/api/v1',                       model:'openrouter/auto',     needKey:true},
+  custom:     {label:'自定义/中转站', keyHint:'任意 OpenAI 兼容接口',         base:'',                                                   model:'',                    needKey:true},
+};
+
+// 单个厂商预设面板（pfx: 's'向导 或 'sp'设置页）
+function providerPanelHTML(pfx, key, cfg) {
+  const p = PROVIDERS[key] || PROVIDERS.custom;
+  const url  = (cfg && cfg.base_url)  || p.base;
+  const model = (cfg && cfg.model)     || p.model;
+  const apikey = (cfg && cfg.api_key) || '';
+  const box = pfx + '-panel-' + key;
+  if (key === 'ollama') {
+    return `<div id="${box}" style="display:none"><div class="form-row">
+      <div class="form-group"><label class="form-label">Ollama 地址</label><input class="form-input" id="${pfx}-${key}-url" value="${escAttr(url)}"><div class="form-hint">默认 localhost:11434</div></div>
+      <div class="form-group"><label class="form-label">模型</label><input class="form-input" id="${pfx}-${key}-model" value="${escAttr(model)}" placeholder="llama3.1"><div class="form-hint">ollama list 查看已安装模型</div></div>
+    </div></div>`;
+  }
+  if (key === 'custom') {
+    return `<div id="${box}" style="display:none">
+      <div class="form-desc">配置任意 OpenAI 兼容接口（自建 API、中转站等）。</div>
+      <div class="form-group"><label class="form-label">API Key *</label><input class="form-input" id="${pfx}-${key}-key" type="password" value="${escAttr(apikey)}" placeholder="你的 API Key"><div class="form-hint">${p.keyHint}</div></div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Base URL *</label><input class="form-input" id="${pfx}-${key}-url" value="${escAttr(url)}" placeholder="https://api.example.com/v1"></div>
+        <div class="form-group"><label class="form-label">模型 *</label><input class="form-input" id="${pfx}-${key}-model" value="${escAttr(model)}" placeholder="gpt-4o / glm-4 / moonshot-v1 ..."></div>
+      </div>
+    </div>`;
+  }
+  return `<div id="${box}" style="display:none">
+    <div class="form-group"><label class="form-label">API Key${p.needKey?' *':''}</label><input class="form-input" id="${pfx}-${key}-key" type="password" value="${escAttr(apikey)}" placeholder="sk-xxx"><div class="form-hint">${p.keyHint}</div></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Base URL</label><input class="form-input" id="${pfx}-${key}-url" value="${escAttr(url)}"></div>
+      <div class="form-group"><label class="form-label">模型</label><input class="form-input" id="${pfx}-${key}-model" value="${escAttr(model)}"></div>
+    </div>
+  </div>`;
+}
+
+// 生成所有厂商标签页 + 面板（active 为当前激活厂商）
+function providerFormHTML(pfx, active, cfg) {
+  const tabs = `<div class="mode-tabs" style="justify-content:center;margin-bottom:20px;flex-wrap:wrap" data-provider="${escAttr(active)}">`
+    + Object.keys(PROVIDERS).map(k =>
+        `<div class="mode-tab ${k===active?'active':''}" onclick="switchProvider('${k}',this)">${PROVIDERS[k].label}</div>`).join('')
+    + '</div>';
+  const panels = Object.keys(PROVIDERS).map(k => providerPanelHTML(pfx, k, cfg.providers && cfg.providers[k])).join('');
+  return tabs + panels;
+}
+
+// 展示/隐藏各厂商面板
+function applyProviderVisibility(pfx, provider) {
+  Object.keys(PROVIDERS).forEach(k => {
+    const el = document.getElementById(pfx + '-panel-' + k);
+    if (el) el.style.display = k === provider ? '' : 'none';
+  });
+}
+
+// 从激活厂商面板收集字段（deepseek/ollama 单独、其余走 custom_*）
+function collectProviderForm(pfx, provider) {
+  const v = id => document.getElementById(pfx + '-' + id).value;
+  const out = {
+    llm_provider: provider,
+    deepseek_api_key: v('deepseek-key'),
+    deepseek_base_url: v('deepseek-url'),
+    deepseek_model: v('deepseek-model'),
+    ollama_base_url: v('ollama-url'),
+    ollama_model: v('ollama-model'),
+  };
+  const isOpenAICompat = provider !== 'deepseek' && provider !== 'ollama';
+  out.custom_base_url = isOpenAICompat ? v(provider + '-url') : '';
+  out.custom_api_key = isOpenAICompat ? v(provider + '-key') : '';
+  out.custom_model  = isOpenAICompat ? v(provider + '-model') : '';
+  return out;
+}
+
 async function loadStep1() {
   const s = await api('/settings');
-  const ol = s.llm_provider === 'ollama';
-  const isCustom = !['deepseek','ollama'].includes(s.llm_provider);
+  const active = ['deepseek','ollama'].includes(s.llm_provider) ? s.llm_provider : (s.llm_provider in PROVIDERS ? s.llm_provider : 'custom');
+  const pfx = 's';
   document.getElementById('settings-panel').innerHTML = `
     <div style="text-align:left">
-        <div class="mode-tabs" style="justify-content:center;margin-bottom:20px;flex-wrap:wrap" data-provider="${s.llm_provider}">
-        <div class="mode-tab ${!ol&&!isCustom?'active':''}" onclick="switchProvider('deepseek',this)">DeepSeek</div>
-        <div class="mode-tab ${ol?'active':''}" onclick="switchProvider('ollama',this)">Ollama（本地）</div>
-        <div class="mode-tab ${s.llm_provider==='openai'?'active':''}" onclick="switchProvider('openai',this)">OpenAI</div>
-        <div class="mode-tab ${s.llm_provider==='zhipu'?'active':''}" onclick="switchProvider('zhipu',this)">智谱GLM</div>
-        <div class="mode-tab ${s.llm_provider==='moonshot'?'active':''}" onclick="switchProvider('moonshot',this)">Moonshot</div>
-        <div class="mode-tab ${s.llm_provider==='qwen'?'active':''}" onclick="switchProvider('qwen',this)">通义千问</div>
-        <div class="mode-tab ${isCustom?'active':''}" onclick="switchProvider('custom',this)">自定义</div>
-      </div>
-      <div id="p-deepseek" style="${ol||isCustom?'display:none':''}">
-        <div class="form-group"><label class="form-label">API Key *</label><input class="form-input" id="s-ds-key" type="password" value="${s.deepseek_api_key}" placeholder="sk-xxx"><div class="form-hint">platform.deepseek.com 获取</div></div>
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">Base URL</label><input class="form-input" id="s-ds-url" value="${s.deepseek_base_url}"></div>
-          <div class="form-group"><label class="form-label">模型</label><input class="form-input" id="s-ds-model" value="${s.deepseek_model}"></div>
-        </div>
-      </div>
-      <div id="p-ollama" style="${ol?'':'display:none'}">
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">Ollama 地址</label><input class="form-input" id="s-ol-url" value="${s.ollama_base_url}"><div class="form-hint">默认 localhost:11434</div></div>
-          <div class="form-group"><label class="form-label">模型</label><input class="form-input" id="s-ol-model" value="${s.ollama_model}" placeholder="llama3.1"><div class="form-hint">ollama list 查看</div></div>
-        </div>
-      </div>
-      <div id="p-custom" style="${isCustom?'':'display:none'}">
-        <div class="form-desc">配置任意 OpenAI 兼容接口（如自建 API、中转站等），只需填写 Base URL、API Key 和模型名</div>
-        <div class="form-group"><label class="form-label">API Key *</label><input class="form-input" id="s-cust-key" type="password" value="${s.custom_api_key||''}" placeholder="你的 API Key"></div>
-        <div class="form-row">
-          <div class="form-group"><label class="form-label">Base URL *</label><input class="form-input" id="s-cust-url" value="${s.custom_base_url||''}" placeholder="https://api.example.com/v1"></div>
-          <div class="form-group"><label class="form-label">模型 *</label><input class="form-input" id="s-cust-model" value="${s.custom_model||''}" placeholder="gpt-4o / glm-4 / moonshot-v1 ..."></div>
-        </div>
+        ${providerFormHTML(pfx, active, s)}
+      <div class="form-row" style="margin-top:12px">
+        <div class="form-group"><label class="form-label">默认温度</label><input class="form-input" id="s-temp" type="number" step="0.1" value="${escAttr(s.default_temperature)}"></div>
+        <div class="form-group"><label class="form-label">最大输出 Token</label><input class="form-input" id="s-max-tokens" type="number" step="1" min="1" max="131072" value="${escAttr(s.max_tokens||8192)}"><div class="form-hint">DeepSeek 建议 8192</div></div>
       </div>
       <div class="form-row" style="margin-top:12px">
-        <div class="form-group"><label class="form-label">默认温度</label><input class="form-input" id="s-temp" type="number" step="0.1" value="${s.default_temperature}"></div>
-        <div class="form-group"><label class="form-label">最大输出 Token</label><input class="form-input" id="s-max-tokens" type="number" step="1" min="1" max="131072" value="${s.max_tokens||8192}"><div class="form-hint">DeepSeek 建议 8192</div></div>
-      </div>
-      <div class="form-row" style="margin-top:12px">
-        <div class="form-group"><label class="form-label">审计模型（可选）</label><input class="form-input" id="s-auditor" value="${s.auditor_model||''}" placeholder="留空用主模型"></div>
+        <div class="form-group"><label class="form-label">审计模型（可选）</label><input class="form-input" id="s-auditor" value="${escAttr(s.auditor_model||'')}" placeholder="留空用主模型"></div>
       </div>
       <div style="margin-top:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <button class="btn" onclick="testLLMConnection('step1')" id="s-test-btn" style="min-width:120px">&#128268; 测试连接</button>
         <span id="s-test-result" style="font-size:13px"></span>
       </div>
     </div>`;
+  applyProviderVisibility(pfx, active);
 }
 
 function switchProvider(p, el) {
   el.parentElement.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  // 用 data-provider 记录当前选择（不依赖文本判断）
   el.parentElement.dataset.provider = p;
-  const isDeepSeek = p === 'deepseek';
-  const isOllama = p === 'ollama';
-  const isOpenAICompatible = !isDeepSeek && !isOllama; // openai/zhipu/moonshot/qwen/custom 都用同一面板
-  document.getElementById('p-deepseek').style.display = isDeepSeek ? '' : 'none';
-  document.getElementById('p-ollama').style.display = isOllama ? '' : 'none';
-  document.getElementById('p-custom').style.display = isOpenAICompatible ? '' : 'none';
+  applyProviderVisibility('s', p);
 }
 
 async function saveSettingsAndNext() {
   // 从 data-provider 读取当前选择（可靠方式，不依赖文本匹配）
   const tabs = document.querySelector('#settings-panel .mode-tabs');
   const provider = tabs && tabs.dataset.provider ? tabs.dataset.provider : 'deepseek';
-  const isOllama = provider === 'ollama';
-  const isOpenAICompatible = !isOllama && provider !== 'deepseek';
+  const body = collectProviderForm('s', provider);
+  body.default_temperature = document.getElementById('s-temp').value;
+  body.max_tokens = document.getElementById('s-max-tokens').value;
+  body.auditor_model = document.getElementById('s-auditor').value;
   await api('/settings', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      llm_provider: provider,
-      deepseek_api_key: document.getElementById('s-ds-key').value,
-      deepseek_base_url: document.getElementById('s-ds-url').value,
-      deepseek_model: document.getElementById('s-ds-model').value,
-      ollama_base_url: document.getElementById('s-ol-url').value,
-      ollama_model: document.getElementById('s-ol-model').value,
-      default_temperature: document.getElementById('s-temp').value,
-      max_tokens: document.getElementById('s-max-tokens').value,
-      auditor_model: document.getElementById('s-auditor').value,
-      custom_base_url: isOpenAICompatible ? document.getElementById('s-cust-url').value : '',
-      custom_api_key: isOpenAICompatible ? document.getElementById('s-cust-key').value : '',
-      custom_model: isOpenAICompatible ? document.getElementById('s-cust-model').value : '',
-    }),
+    body: JSON.stringify(body),
   });
   apiConfigured = true; apiProvider = provider;
   updateStepsBar(); toast('配置已保存', true); goStep(2);
 }
 
 async function testLLMConnection(source) {
-  const prefix = source === 'step1' ? 's-' : 'sp-';
-  const btn = document.getElementById(prefix + 'test-btn');
-  const resultEl = document.getElementById(prefix + 'test-result');
+  const pfx = source === 'step1' ? 's' : 'sp';
+  const btn = document.getElementById(pfx + '-test-btn');
+  const resultEl = document.getElementById(pfx + '-test-result');
   const tabs = document.querySelector('#' + (source === 'step1' ? 'settings-panel' : 'settings-page-panel') + ' .mode-tabs');
   const provider = tabs && tabs.dataset.provider ? tabs.dataset.provider : 'deepseek';
-  const isOllama = provider === 'ollama';
-  const isOpenAICompatible = !isOllama && provider !== 'deepseek';
 
   btn.disabled = true;
   btn.textContent = '测试中...';
   resultEl.innerHTML = '<span style="color:var(--text3)">正在连接...</span>';
 
   try {
+    const body = collectProviderForm(pfx, provider);
     const resp = await api('/test-llm-connection', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        llm_provider: provider,
-        deepseek_api_key: document.getElementById(prefix + 'ds-key').value,
-        deepseek_base_url: document.getElementById(prefix + 'ds-url').value,
-        deepseek_model: document.getElementById(prefix + 'ds-model').value,
-        ollama_base_url: document.getElementById(prefix + 'ol-url').value,
-        ollama_model: document.getElementById(prefix + 'ol-model').value,
-        custom_base_url: isOpenAICompatible ? document.getElementById(prefix + 'cust-url').value : '',
-        custom_api_key: isOpenAICompatible ? document.getElementById(prefix + 'cust-key').value : '',
-        custom_model: isOpenAICompatible ? document.getElementById(prefix + 'cust-model').value : '',
-      }),
+      body: JSON.stringify(body),
     });
 
     if (resp.ok) {
@@ -3224,31 +3252,38 @@ async function viewChapter(ch) {
 
 async function doWrite(count) {
   if (!currentBook) return toast('请先选择书籍', false);
-  count = count || 1;
-  // 检查准备状态
-  const stage = bookData?.book?.stage || 0;
-  if (stage < 2) {
-    const go = confirm('当前尚未完成世界观设定，直接写作可能导致内容质量不佳。\n\n建议先完成以下步骤：\n1. 配置角色、世界观\n2. 生成故事大纲和章节大纲\n\n是否仍要继续写作？');
-    if (!go) return;
-  } else if (stage < 3) {
-    const go = confirm('当前尚未生成故事大纲，系统将自动生成（AI 可能产出不稳定）。\n\n建议先手动生成大纲后再写作。\n\n是否仍要继续？');
-    if (!go) return;
-  }
-  const log = document.getElementById('write-log');
-  if (log) log.innerHTML = '<div class="loading" style="padding:12px">正在写作，请耐心等待（每章约 1-3 分钟）...</div>';
-  toast('正在使用管线写作...', 'loading');
-  // 如果填了风格，先保存到书籍配置
-  const styleVal = document.getElementById('qw-style-override')?.value?.trim();
-  if (styleVal) {
-    try { await api(`/books/${currentBook.id}/config`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ style_guide: styleVal }) }); } catch(e) {}
-  }
+  // 防重入：写正文耗时较长，避免重复点击触发多个并发请求撞 GLM 的 1 并发
+  if (window._writingBusy) return toast('正在写作中，请等待当前章节完成', false);
+  window._writingBusy = true;
   try {
-    const res = await api(`/action/write?book_id=${encodeURIComponent(currentBook.id)}&count=${count}`, {
-      method: 'POST',
-    });
-    if (res.ok) { toast('写作完成', true); await loadBookData(); loadStep5(); }
-    else { toast('写作失败', false); if (log) log.innerHTML = `<div style="font-size:12px;color:var(--red);white-space:pre-wrap;max-height:200px;overflow-y:auto">${res.stderr||res.stdout||'未知错误'}</div>`; }
-  } catch (e) { toast('请求失败: ' + e.message, false); }
+    count = count || 1;
+    // 检查准备状态
+    const stage = bookData?.book?.stage || 0;
+    if (stage < 2) {
+      const go = confirm('当前尚未完成世界观设定，直接写作可能导致内容质量不佳。\n\n建议先完成以下步骤：\n1. 配置角色、世界观\n2. 生成故事大纲和章节大纲\n\n是否仍要继续写作？');
+      if (!go) return;
+    } else if (stage < 3) {
+      const go = confirm('当前尚未生成故事大纲，系统将自动生成（AI 可能产出不稳定）。\n\n建议先手动生成大纲后再写作。\n\n是否仍要继续？');
+      if (!go) return;
+    }
+    const log = document.getElementById('write-log');
+    if (log) log.innerHTML = '<div class="loading" style="padding:12px">正在写作，请耐心等待（每章约 1-3 分钟）...</div>';
+    toast('正在使用管线写作...', 'loading');
+    // 如果填了风格，先保存到书籍配置
+    const styleVal = document.getElementById('qw-style-override')?.value?.trim();
+    if (styleVal) {
+      try { await api(`/books/${currentBook.id}/config`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ style_guide: styleVal }) }); } catch(e) {}
+    }
+    try {
+      const res = await api(`/action/write?book_id=${encodeURIComponent(currentBook.id)}&count=${count}`, {
+        method: 'POST',
+      });
+      if (res.ok) { toast('写作完成', true); await loadBookData(); loadStep5(); }
+      else { toast('写作失败', false); if (log) log.innerHTML = `<div style="font-size:12px;color:var(--red);white-space:pre-wrap;max-height:200px;overflow-y:auto">${res.stderr||res.stdout||'未知错误'}</div>`; }
+    } catch (e) { toast('请求失败: ' + e.message, false); }
+  } finally {
+    window._writingBusy = false;
+  }
 }
 
 // ── 续写 & 导入功能 ──────────────────────────────────────────────────────
@@ -4276,48 +4311,22 @@ function drawArc(charId) {
 
 async function loadSettingsPage() {
   const s = await api('/settings');
-  const ol = s.llm_provider === 'ollama';
-  const isCustom = !['deepseek','ollama'].includes(s.llm_provider);
+  const active = ['deepseek','ollama'].includes(s.llm_provider) ? s.llm_provider : (s.llm_provider in PROVIDERS ? s.llm_provider : 'custom');
+  const pfx = 'sp';
   document.getElementById('settings-page-panel').innerHTML = `
     <div style="max-width:600px;margin:0 auto">
       <div class="card">
         <div class="card-header">&#9881; API 配置</div>
-        <div class="mode-tabs" style="flex-wrap:wrap" data-provider="${s.llm_provider}">
-          <div class="mode-tab ${!ol&&!isCustom?'active':''}" onclick="switchSP('deepseek',this)">DeepSeek</div>
-          <div class="mode-tab ${ol?'active':''}" onclick="switchSP('ollama',this)">Ollama</div>
-          <div class="mode-tab ${s.llm_provider==='openai'?'active':''}" onclick="switchSP('openai',this)">OpenAI</div>
-          <div class="mode-tab ${s.llm_provider==='zhipu'?'active':''}" onclick="switchSP('zhipu',this)">智谱GLM</div>
-          <div class="mode-tab ${s.llm_provider==='moonshot'?'active':''}" onclick="switchSP('moonshot',this)">Moonshot</div>
-          <div class="mode-tab ${s.llm_provider==='qwen'?'active':''}" onclick="switchSP('qwen',this)">通义千问</div>
-          <div class="mode-tab ${isCustom?'active':''}" onclick="switchSP('custom',this)">自定义</div>
+        <div class="mode-tabs" style="flex-wrap:wrap" data-provider="${escAttr(active)}">
+          ${Object.keys(PROVIDERS).map(k => `<div class="mode-tab ${k===active?'active':''}" onclick="switchSP('${k}',this)">${PROVIDERS[k].label}</div>`).join('')}
         </div>
-        <div id="sp-deepseek" style="${ol||isCustom?'display:none':''}">
-          <div class="form-group"><label class="form-label">API Key *</label><input class="form-input" id="sp-ds-key" type="password" value="${s.deepseek_api_key}"></div>
-          <div class="form-row">
-            <div class="form-group"><label class="form-label">Base URL</label><input class="form-input" id="sp-ds-url" value="${s.deepseek_base_url}"></div>
-            <div class="form-group"><label class="form-label">模型</label><input class="form-input" id="sp-ds-model" value="${s.deepseek_model}"></div>
-          </div>
-        </div>
-        <div id="sp-ollama" style="${ol?'':'display:none'}">
-          <div class="form-row">
-            <div class="form-group"><label class="form-label">地址</label><input class="form-input" id="sp-ol-url" value="${s.ollama_base_url}"></div>
-            <div class="form-group"><label class="form-label">模型</label><input class="form-input" id="sp-ol-model" value="${s.ollama_model}"></div>
-          </div>
-        </div>
-        <div id="sp-custom" style="${isCustom?'':'display:none'}">
-          <div class="form-desc">配置任意 OpenAI 兼容接口</div>
-          <div class="form-group"><label class="form-label">API Key *</label><input class="form-input" id="sp-cust-key" type="password" value="${s.custom_api_key||''}"></div>
-          <div class="form-row">
-            <div class="form-group"><label class="form-label">Base URL *</label><input class="form-input" id="sp-cust-url" value="${s.custom_base_url||''}"></div>
-            <div class="form-group"><label class="form-label">模型 *</label><input class="form-input" id="sp-cust-model" value="${s.custom_model||''}"></div>
-          </div>
+        ${Object.keys(PROVIDERS).map(k => providerPanelHTML(pfx, k, s.providers && s.providers[k])).join('')}
+        <div class="form-row" style="margin-top:12px">
+          <div class="form-group"><label class="form-label">默认温度</label><input class="form-input" id="sp-temp" type="number" step="0.1" value="${escAttr(s.default_temperature)}"></div>
+          <div class="form-group"><label class="form-label">最大输出 Token</label><input class="form-input" id="sp-max-tokens" type="number" step="1" min="1" max="131072" value="${escAttr(s.max_tokens||8192)}"><div class="form-hint">DeepSeek 建议 8192</div></div>
         </div>
         <div class="form-row" style="margin-top:12px">
-          <div class="form-group"><label class="form-label">默认温度</label><input class="form-input" id="sp-temp" type="number" step="0.1" value="${s.default_temperature}"></div>
-          <div class="form-group"><label class="form-label">最大输出 Token</label><input class="form-input" id="sp-max-tokens" type="number" step="1" min="1" max="131072" value="${s.max_tokens||8192}"><div class="form-hint">DeepSeek 建议 8192</div></div>
-        </div>
-        <div class="form-row" style="margin-top:12px">
-          <div class="form-group"><label class="form-label">审计模型</label><input class="form-input" id="sp-auditor" value="${s.auditor_model||''}" placeholder="留空用主模型"></div>
+          <div class="form-group"><label class="form-label">审计模型</label><input class="form-input" id="sp-auditor" value="${escAttr(s.auditor_model||'')}" placeholder="留空用主模型"></div>
         </div>
         <div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="saveSettingsFromPage()">保存</button>
@@ -4327,40 +4336,27 @@ async function loadSettingsPage() {
         <div id="sp-test-result" style="margin-top:8px;font-size:13px"></div>
       </div>
     </div>`;
+  applyProviderVisibility(pfx, active);
 }
 
 function switchSP(p, el) {
   el.parentElement.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   el.parentElement.dataset.provider = p;
-  const isOpenAICompatible = !['deepseek','ollama'].includes(p);
-  document.getElementById('sp-deepseek').style.display = p === 'deepseek' ? '' : 'none';
-  document.getElementById('sp-ollama').style.display = p === 'ollama' ? '' : 'none';
-  document.getElementById('sp-custom').style.display = isOpenAICompatible ? '' : 'none';
+  applyProviderVisibility('sp', p);
 }
 
 async function saveSettingsFromPage() {
   // 从 data-provider 读取当前选择（可靠方式）
   const tabs = document.querySelector('#settings-page-panel .mode-tabs');
   const provider = tabs && tabs.dataset.provider ? tabs.dataset.provider : 'deepseek';
-  const isOllama = provider === 'ollama';
-  const isOpenAICompatible = !isOllama && provider !== 'deepseek';
+  const body = collectProviderForm('sp', provider);
+  body.default_temperature = document.getElementById('sp-temp').value;
+  body.max_tokens = document.getElementById('sp-max-tokens').value;
+  body.auditor_model = document.getElementById('sp-auditor').value;
   await api('/settings', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      llm_provider: provider,
-      deepseek_api_key: document.getElementById('sp-ds-key').value,
-      deepseek_base_url: document.getElementById('sp-ds-url').value,
-      deepseek_model: document.getElementById('sp-ds-model').value,
-      ollama_base_url: document.getElementById('sp-ol-url').value,
-      ollama_model: document.getElementById('sp-ol-model').value,
-      default_temperature: document.getElementById('sp-temp').value,
-      max_tokens: document.getElementById('sp-max-tokens').value,
-      auditor_model: document.getElementById('sp-auditor').value,
-      custom_base_url: isOpenAICompatible ? document.getElementById('sp-cust-url').value : '',
-      custom_api_key: isOpenAICompatible ? document.getElementById('sp-cust-key').value : '',
-      custom_model: isOpenAICompatible ? document.getElementById('sp-cust-model').value : '',
-    }),
+    body: JSON.stringify(body),
   });
   apiConfigured = true; apiProvider = provider;
   updateStepsBar(); toast('设置已保存', true);

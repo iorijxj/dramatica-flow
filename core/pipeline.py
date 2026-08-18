@@ -401,14 +401,18 @@ class WritingPipeline:
                     )
                 parts.append("")
 
-        # 跨线程因果链
-        cross_links = [cl for cl in ws.causal_chain
-                       if cl.source_thread_id and cl.source_thread_id != cl.thread_id
-                       and cl.thread_id == current_thread_id]
+        # 跨线程因果链：摘录其他线程已确立的因果，作为本章不应与其冲突的参照
+        cross_links = [
+            cl for cl in ws.causal_chain
+            if cl.thread_id and cl.thread_id != current_thread_id
+            and cl.chapter <= chapter
+        ]
         if cross_links:
             parts.append("### 受其他线程影响的因果链\n")
             for cl in cross_links[-5:]:
-                parts.append(f"- Ch.{cl.chapter}：{cl.event}（因：来自 {cl.source_thread_id} 的 {cl.cause}）")
+                parts.append(
+                    f"- Ch.{cl.chapter}（{cl.thread_id}）：{cl.event}（因：{cl.cause}）"
+                )
             parts.append("")
 
         return "\n".join(parts)
@@ -543,11 +547,21 @@ class WritingPipeline:
                     if len(chars) == 2:
                         char_a = chars[0].strip()
                         char_b_detail = chars[1].strip()
-                        # 从 detail 提取 delta
+                        # 从 detail 提取 delta（兼容两种格式）
                         import re
-                        m = re.search(r'([+-]\d+)', detail)
-                        delta = int(m.group(1)) if m else 0
-                        reason = re.sub(r'[+-]\d+[，,]?\s*', '', detail).strip()
+                        # 格式A（优先）：起止换算  "从-80变为-60" / "从-80到-60" / "-80 -> -60"
+                        m_change = re.search(r'从\s*([+-]?\d+)\s*(?:变为|到|变成|到\s*|\->|→)\s*([+-]?\d+)', detail)
+                        if m_change:
+                            delta = int(m_change.group(2)) - int(m_change.group(1))
+                            reason = re.sub(
+                                r'从\s*[+-]?\d+\s*(?:变为|到|变成|\->|→)\s*[+-]?\d+\s*[，,]?\s*',
+                                '', detail,
+                            ).strip()
+                        else:
+                            # 格式B：直接增量  "+20"
+                            m_single = re.search(r'([+-]\d+)', detail)
+                            delta = int(m_single.group(1)) if m_single else 0
+                            reason = re.sub(r'[+-]\d+[，,]?\s*', '', detail).strip()
                         self.sm.update_relationship(char_a, char_b_detail, delta, chapter, reason)
             except Exception:
                 pass  # 关系变化解析失败静默跳过
