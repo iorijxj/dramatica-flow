@@ -458,11 +458,11 @@ function updateStepsBar() {
   if (apiConfigured) {
     indicator.style.display = '';
     document.getElementById('config-dot').style.background = 'var(--green)';
-    const providerNames = {deepseek:'DeepSeek',ollama:'Ollama',openai:'OpenAI',zhipu:'智谱GLM',moonshot:'Moonshot',qwen:'通义千问',doubao:'豆包',siliconflow:'硅基流动',openrouter:'OpenRouter',custom:'自定义'};
+    const providerNames = {deepseek:'DeepSeek',ollama:'Ollama',openai:'OpenAI',zhipu:'智谱GLM',moonshot:'Moonshot',qwen:'通义千问',doubao:'豆包',siliconflow:'硅基流动',mimo:'小米MiMo',openrouter:'OpenRouter',custom:'自定义'};
     document.getElementById('config-text').textContent = providerNames[apiProvider] || apiProvider;
   } else indicator.style.display = 'none';
   const sb = document.getElementById('topbar-settings-btn');
-  const providerNames = {deepseek:'DeepSeek',ollama:'Ollama',openai:'OpenAI',zhipu:'智谱GLM',moonshot:'Moonshot',qwen:'通义千问',doubao:'豆包',siliconflow:'硅基流动',openrouter:'OpenRouter',custom:'自定义'};
+  const providerNames = {deepseek:'DeepSeek',ollama:'Ollama',openai:'OpenAI',zhipu:'智谱GLM',moonshot:'Moonshot',qwen:'通义千问',doubao:'豆包',siliconflow:'硅基流动',mimo:'小米MiMo',openrouter:'OpenRouter',custom:'自定义'};
   sb.innerHTML = apiConfigured ? ('&#9881; ' + (providerNames[apiProvider] || apiProvider)) : '&#9881;';
   document.querySelectorAll('.step-item').forEach(s => {
     const sn = parseInt(s.dataset.step);
@@ -634,6 +634,7 @@ const PROVIDERS = {
   qwen:       {label:'通义千问',       keyHint:'bailian.console.aliyun.com 获取', base:'https://dashscope.aliyuncs.com/compatible-mode/v1', model:'qwen-plus',           needKey:true},
   doubao:     {label:'豆包·火山方舟', keyHint:'console.volcengine.com/ark 获取', base:'https://ark.cn-beijing.volces.com/api/v3',           model:'doubao-pro-32k',      needKey:true},
   siliconflow:{label:'硅基流动',       keyHint:'siliconflow.cn 获取',          base:'https://api.siliconflow.cn/v1',                      model:'deepseek-ai/DeepSeek-V3', needKey:true},
+  mimo:       {label:'小米MiMo',        keyHint:'platform.xiaomimimo.com 获取', base:'https://api.xiaomimimo.com/v1',                      model:'mimo-v2.5',               needKey:true},
   openrouter: {label:'OpenRouter',     keyHint:'openrouter.ai 获取',           base:'https://openrouter.ai/api/v1',                       model:'openrouter/auto',     needKey:true},
   custom:     {label:'自定义/中转站', keyHint:'任意 OpenAI 兼容接口',         base:'',                                                   model:'',                    needKey:true},
 };
